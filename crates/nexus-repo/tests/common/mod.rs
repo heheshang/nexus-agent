@@ -20,6 +20,10 @@
 //! PostgreSQL `services:` 与 `DATABASE_URL` 环境变量。
 //! 那一段注释写得很清楚：「没有这一步，集成测试会全部跳过」。
 //!
+//! 而且在 CI 里**缺 `DATABASE_URL` 会直接 panic** —— 见 [`database_url`]。
+//! 否则「跳过」在测试摘要里显示成 `passed`，CI 全绿但**一条数据库测试都没跑** ——
+//! 「集成测试绿」就成了假象。这正是 NEX-14 的 AC #14 要防的事。
+//!
 //! # 「跳过」的实现方式
 //!
 //! **不**用 `#[ignore]` —— 那样 CI 也要额外加 `--ignored` 才会跑，
@@ -33,24 +37,6 @@ use sqlx::PgPool;
 /// 测试库的连接 URL 的环境变量名。
 pub const ENV_DATABASE_URL: &str = "DATABASE_URL";
 
-/// 打印「跳过」说明并返回 `None`。
-///
-/// # 为什么打印到 stdout
-///
-/// `cargo test` 默认**捕获** stdout，只有失败时才显示。
-/// 所以测试**成功**时这行输出**不会**出现在 CI 日志里 ——
-/// 那正是问题：CI 日志里看不到「集成测试被跳过了」。
-///
-/// 所以这里用 `eprintln!`（stderr 不被捕获），
-/// 让「被跳过」这件事在 CI 日志里**看得见**。
-fn skipped(test_name: &str) -> Option<PgPool> {
-    eprintln!(
-        "[SKIP] {test_name}：环境变量 {ENV_DATABASE_URL} 未设置，跳过集成测试。\
-         设置它以运行真实数据库测试（例：{ENV_DATABASE_URL}=postgres://user:pass@127.0.0.1:5432/db）"
-    );
-    None
-}
-
 /// 取测试连接池；没有 `DATABASE_URL` 时返回 `None`（表示跳过）。
 ///
 /// # 错误
@@ -60,12 +46,13 @@ fn skipped(test_name: &str) -> Option<PgPool> {
 /// 数据库地址写错时，测试会静默地全部跳过，而 CI 显示绿。
 ///
 /// 所以这里把「环境变量缺失」（跳过）与「连接失败」（错误）**严格区分**。
+///
+/// # CI 环境下缺 `DATABASE_URL` 是**错误**，不是「跳过」
+///
+/// 见 [`database_url`]。
 pub async fn test_pool(test_name: &str) -> Result<Option<PgPool>, sqlx::Error> {
-    let Some(url) = std::env::var(ENV_DATABASE_URL)
-        .ok()
-        .filter(|u| !u.trim().is_empty())
-    else {
-        return Ok(skipped(test_name));
+    let Some(url) = database_url(test_name) else {
+        return Ok(None);
     };
 
     let pool = sqlx::postgres::PgPoolOptions::new()
@@ -77,6 +64,67 @@ pub async fn test_pool(test_name: &str) -> Result<Option<PgPool>, sqlx::Error> {
     Ok(Some(pool))
 }
 
+/// 取 `DATABASE_URL`；缺失时返回 `None`。
+///
+/// # CI 里的特殊处理
+///
+/// CI 环境下**缺 `DATABASE_URL` 是错误**，不是「跳过」——
+/// 因为 CI **一定**应该能跑集成测试（`.github/workflows/ci.yml` 配了
+/// `postgres:17` 服务）。缺了就说明 CI 配置坏了，必须暴露出来。
+///
+/// # 为什么必须是 panic 而不是「打印警告后跳过」
+///
+/// `cargo test` 里「跳过」的测试显示为 **passed** —— CI 日志会显示一片绿，
+/// 但一条数据库测试都没跑。AC #14 的判据是「集成测试在 CI 里**真的跑**」，
+/// 而「显示为 passed 的跳过」**恰好就是那个假象**。
+///
+/// 所以在 CI 里缺库必须**炸** —— 让 CI 红，而不是让 CI 假绿。
+///
+/// # 为什么「跳过」信息必须打到 stderr
+///
+/// `cargo test` 默认**捕获** stdout，只有失败时才显示。
+/// 所以测试**成功**时这行输出**不会**出现在 CI 日志里 ——
+/// 那正是问题：CI 日志里看不到「集成测试被跳过了」。
+///
+/// 所以这里用 `eprintln!`（stderr 不被捕获），
+/// 让「被跳过」这件事在 CI 日志里**看得见**。
+///
+/// # 与 `nexus-infra` 的行为一致
+///
+/// `crates/nexus-infra/tests/migration.rs` 里有**同样**的检查 ——
+/// 两个 crate 的集成测试基座对「CI 缺库」必须**一致地失败**，
+/// 否则只跑一半的 crate 就会造成不对称的假象。
+fn database_url(test_name: &str) -> Option<String> {
+    let url = std::env::var(ENV_DATABASE_URL)
+        .ok()
+        .filter(|u| !u.trim().is_empty());
+
+    if url.is_none() {
+        if is_ci() {
+            panic!(
+                "CI 环境下必须有 {ENV_DATABASE_URL} —— 集成测试被跳过了，\
+                 「集成测试绿」是假象。检查 .github/workflows/ci.yml 的 services 与 env。"
+            );
+        }
+        eprintln!(
+            "[SKIP] {test_name}：环境变量 {ENV_DATABASE_URL} 未设置，跳过集成测试。\
+             设置它以运行真实数据库测试（例：{ENV_DATABASE_URL}=postgres://user:pass@127.0.0.1:5432/db）"
+        );
+        return None;
+    }
+
+    url
+}
+
+/// 是否在 CI 环境。
+///
+/// `CI` 是 GitHub Actions 等 CI 平台统一设置的环境变量。
+fn is_ci() -> bool {
+    std::env::var("CI")
+        .map(|v| !v.is_empty() && v != "false" && v != "0")
+        .unwrap_or(false)
+}
+
 /// 测试库的连接 URL。
 ///
 /// # 为什么需要这个辅助
@@ -84,9 +132,7 @@ pub async fn test_pool(test_name: &str) -> Result<Option<PgPool>, sqlx::Error> {
 /// [`QueueGuard::acquire`] 需要**独立连接**（不是从池里借的）——
 /// 所以它要 URL 而不是 `PgPool`。
 pub fn test_database_url() -> Option<String> {
-    std::env::var(ENV_DATABASE_URL)
-        .ok()
-        .filter(|u| !u.trim().is_empty())
+    database_url("test_database_url")
 }
 
 /// **跨进程**的全局队列锁 —— 基于 PostgreSQL 的**咨询锁**（advisory lock）。

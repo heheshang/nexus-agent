@@ -1452,17 +1452,37 @@ nexus-repo 实现：impl ChunkStore for PgChunkRepo { ... }   ← 实现在数�
 
 ## 4.3 目标态 vs 当前实现
 
-本节诚实记录设计目标与当前 workspace 的差距。**P0 已完成，P1 已完成。**
+本节诚实记录设计目标与当前 workspace 的差距。**P0 已完成，P1 已完成，P2 已完成。**
 
 | 项 | 设计目标 | 当前实现 | 状态 |
 |---|---|---|---|
-| `nexus-repo` ↔ `nexus-rag` | 单向 `repo → rag` | 已单向（`repo` 依赖 `rag`） | ✅ |
+| `nexus-repo` ↔ `nexus-rag` | 单向 `repo → rag` | 已单向（`repo` 依赖 `rag`）；**但 `nexus-rag` 尚未定义任何 trait** —— 见下方注记 | ⚠️ **部分**（依赖方向成立，trait 落地属 P7） |
 | `nexus-execution` → `nexus-repo` | 不依赖 | 不依赖 | ✅ |
 | `nexus-model` 纯净 | 无数据库痕迹 | 无 | ✅ |
 | `nexus-core` 子模块 | 类型状态、事件、错误 | 类型化 ID（18）+ 取消语义 + 事件（12）+ 业务码（42） | ✅ |
 | `nexus-mcp` / `nexus-a2a` 位置 | 见 §4.3.1（已定稿） | 能力层（不依赖 `service`） | ✅ |
 | `nexus-vector` | 能力层（抽象 + 实现），见 §4.3.3 | 独立 crate | ✅ |
 | `nexus-service` → `nexus-execution` | 见 §4.3.2（已定稿） | 依赖 | ✅ |
+
+> **`nexus-rag` 的 trait 尚未落地 —— 这是 P2 的诚实结论。**
+>
+> §4.1.2 的 consumer-defined trait 手法（`rag::ChunkStore` 由 `repo::PgChunkRepo` 实现）
+> 目前只有**依赖方向**成立：`nexus-repo` 的 `Cargo.toml` 确实声明了 `nexus-rag.workspace = true`。
+>
+> 但 `crates/nexus-rag/src/lib.rs` 目前只有 `CRATE_NAME` 常量 ——
+> **没有任何 `pub trait`**，`nexus-repo` 里也**没有对应的 `impl`**。
+>
+> 原因是 P2 的范围是「`nexus-infra` + `nexus-repo`」，
+> 而 `nexus-rag` 的内容属于 **P7（知识与记忆）**。
+>
+> 所以「`repo → rag` 的单向依赖」在 P2 只能作为**依赖图层面的事实**成立，
+> 不能声称「已有 trait 实现的实证」。
+> 该实证由 `examples/demo-consumer-trait` 提供（§5.5）——
+> demo 证明了**这个手法可行**，生产代码的落地在 P7。
+>
+> **架构测试已把依赖方向锁住**：`nexus-repo` 只依赖能力层（含 `nexus-rag`），
+> 能力层不得反向依赖 `nexus-repo` —— 两侧都有可执行断言（§5.3）。
+
 
 **三个待定问题已在 2026-11-04 定稿** —— 依据是 `examples/` 下的实证 demo。
 
@@ -1713,15 +1733,15 @@ Rust 的测试可以验证「某段代码**不能**编译」：
 
 ## 5.3 结构层的检验：架构测试
 
-当前 workspace 已有 **10 个**架构测试（依赖方向、无环、sqlx 收敛、锁纪律、依赖版本纪律、lints 继承、入口文件）。设计文档落地后需补充：
+当前 workspace 已有 **16 个**架构测试（依赖方向、无环、sqlx 收敛、锁纪律、依赖版本纪律、lints 继承、入口文件、`workflow_runs` 允许集、`nexus-repo` 正向依赖面）。设计文档落地后需补充：
 
 | 测试 | 检验的设计条款 | 状态 |
 |---|---|---|
-| `workflow_runs` 只在 `nexus-execution` 出现 | §4.2 差异 1 | ✅ 已落地（`nexus-repo` 的源码扫描架构测试，NEX-11） |
+| `workflow_runs` 只在 `nexus-execution` 出现 | §4.2 差异 1 | ✅ 已落地（**允许集**断言：`nexus-core` 的 `workflow_runs_appears_only_in_execution_owned_crates`，全 workspace 扫描；另有 `nexus-repo` 的负向断言，NEX-11 / NEX-14） |
 | `nexus-model` 不含 `FromRow` / `sqlx::Type` | §4.2 差异 2 | ✅ 已有 |
 | `nexus-core` 零内部依赖 | §4.4 规则 2 | ✅ 已有 |
 | 能力层不依赖 `nexus-repo` | §4.1.2（防环） | ✅ 已有 |
-| `nexus-repo` 只依赖能力层（单向） | §4.1.2 | ✅ 已落地（`check-deps.sh` 规则 5 + `Cargo.toml` ↔ `deps_of` 一致性核对，NEX-11） |
+| `nexus-repo` 只依赖能力层（单向） | §4.1.2 | ✅ 已落地（**正向**断言：`nexus-core` 的 `nexus_repo_depends_only_on_capability_layer`；**反向**断言：`check-deps.sh` 规则 5；**一致性**核对：`check-deps.sh` 规则 7，NEX-14） |
 | 行类型列名与真实 schema 一致 | §3.9.3（`query_as` 运行期校验的代价） | ✅ 已落地（`nexus-repo` 的 `schema_conformance` 集成测试，NEX-11） |
 | outbox 表挂在**引擎侧** | §4.2 差异 1 | ✅ 已落地（NEX-13 的 `outbox_tables_are_engine_side_only` 源码扫描） |
 | 规范化 JSON 的实现**只有一份**（在 `nexus-core`） | §3.5 + §4.4 规则 2 | ✅ 已落地（NEX-13 的 `canonicalization_lives_in_nexus_core_only`） |
@@ -1738,6 +1758,31 @@ Rust 的测试可以验证「某段代码**不能**编译」：
 > ③ 新增 `schema_conformance` 集成测试 —— 它把「`query_as` 的运行期校验」
 > 这一决策的代价（列名写错要到运行时才炸）转成了**可执行的防线**：
 > 17 个行类型的列名集合必须与真实 PG schema 的列名集合**完全相等**。
+>
+> **落地记录（2026-11-04，NEX-14 完成）**：本表的两处 P2 行被**加固** ——
+>
+> ① **`workflow_runs` 的断言从「负向」升级为「允许集」**。
+> NEX-11 的断言只覆盖 `nexus-repo` 一个 crate ——
+> `nexus-service` / `nexus-api` / `nexus-agent` 引用 `workflow_runs` 它照样绿，
+> 而那同样破坏「只有执行层能写」的前提。
+> 新增 `workflow_runs_appears_only_in_execution_owned_crates`：
+> **全 workspace** 扫描 `src/`，允许集只有 `nexus-execution`（独占方）
+> 与 `nexus-infra`（迁移 DDL —— 建表不是访问）。
+>
+> ② **`nexus-repo` 的依赖面断言补上了「正向」那一半**。
+> 原先只有「能力层不依赖 `nexus-repo`」（反向）——
+> `nexus-repo` 依赖 `nexus-service`（上层）能通过，
+> 而那会形成 `service → repo → service` 的环。
+> 新增 `nexus_repo_depends_only_on_capability_layer`：
+> `nexus-repo` 的内部依赖**全部**落在「能力层 + 依赖图的根 + 同层的 `nexus-infra`」里。
+>
+> ③ **补上了 `check-deps.sh` 规则 7**（`deps_of` ↔ `Cargo.toml` 一致性核对）。
+> §5.3 曾把这条写成「已落地」，而脚本里**并没有**它 ——
+> 文档声称与实现不符本身就是缺陷。
+> 现在规则 1/2/4/5 全部基于 `deps_of` 判定，
+> 它若与真实 manifest 漂移，那些规则就变成「在错误的依赖图上做正确的判定」。
+> 已用**注入依赖漂移**的方式验证过规则 7 确实会红。
+
 
 ## 5.4 行为层的检验：不变量测试
 
@@ -1767,10 +1812,33 @@ Rust 的测试可以验证「某段代码**不能**编译」：
 | 事件与 outbox **同事务** | 提交后二者同时可见；未提交时都不可见 | ✅ 已验证（NEX-13 `event_and_outbox_are_written_in_the_same_transaction`） |
 | 序号分配与写入**同事务** | 故意回滚后 `next_seq` **不前进** | ✅ 已验证（NEX-13 `rolled_back_transaction_does_not_advance_seq`，变异测试确认有效） |
 | 幂等键重复提交返回既有 run | 同键提交两次 → 同 run ID，库中只一条 | ✅ 已验证（NEX-13 `duplicate_submit_returns_the_existing_run`） |
+| 迁移可在**空库**完整应用 | 空 schema → 迁移 → 断言 Phase 0 的 19 张表都在 | ✅ 已验证（NEX-9 / NEX-14 `migrations_apply_to_an_empty_database`） |
+| 迁移**可重复执行** | 连跑两次不报错，且版本号不前进 | ✅ 已验证（NEX-14 `migrations_are_idempotent`） |
+| 迁移**可回滚** | 回滚到 0 后业务表全部消失（`_sqlx_migrations` 除外） | ✅ 已验证（NEX-14 `migrations_can_be_rolled_back`） |
+| 部分索引**只覆盖就绪行** | 断言 7 个索引的定义含 `WHERE` 子句 | ✅ 已验证（NEX-14 `partial_indexes_are_actually_partial`） |
+| 并发领取**互不阻塞** | 3 个并发连接各领不同 run | ✅ 已验证（NEX-12 `three_concurrent_claimers_get_different_runs`） |
+| `generation` fencing 拒绝僵尸写入 | 旧持有者写入影响 0 行 | ✅ 已验证（NEX-12 `stale_generation_write_is_rejected`） |
+| 集成测试在 CI 里**真的跑** | 解析 `cargo test` 输出，断言各集成套件的测试数达阈值 | ✅ 已验证（NEX-14 CI 的「校验集成测试真的跑了」步骤） |
+| CI 缺 `DATABASE_URL` 时**必须红** | 集成测试基座在 CI 环境 panic，而非静默跳过 | ✅ 已验证（NEX-14 `nexus-repo` / `nexus-infra` 两套基座行为一致） |
 
 > ✅ 已验证项均在 2026-11-04 实测（PostgreSQL 17 / Rust 1.99.1）。
 >
 > **这些 demo 位于 `examples/`（独立 workspace）** —— 见 §5.5。
+>
+> **落地记录（2026-11-04，NEX-14 完成）**：P2 的行为层不变量补齐了 6 条 ——
+> 迁移的空库应用 / 幂等 / 可回滚、部分索引的 `WHERE` 子句、
+> 并发领取互不阻塞、`generation` fencing 拒绝僵尸写入。
+> 前 5 条各有对应的集成测试；最后 1 条（CI 真跑）由 CI 的输出解析步骤保证。
+>
+> **「集成测试绿」必须有防伪** —— 这是 P2 收口最重要的一条认知：
+>
+> | 假象形态 | 防线 |
+> |---|---|
+> | 没有 `DATABASE_URL` → 测试全部「跳过」 → 摘要显示 `passed` | 集成测试基座在 CI 环境**直接 panic** |
+> | CI 的 PG 服务是**空库** → 表不存在 → 测试报错 | CI 增加「应用数据库迁移」步骤（`apply-migrations` 二进制） |
+> | 测试套件**根本没被编进来** | CI 解析 `cargo test` 输出，断言各集成套件的测试数达阈值 |
+>
+> 三条防线都已用**注入故障**的方式验证过会红。
 
 ## 5.5 验证 demo 的组织方式
 
@@ -1868,7 +1936,7 @@ cd <nexus-agent>/examples && cargo run -p demo-lease-fencing
 |---|---|---|---|
 | **P0 骨架** | workspace、crate 边界、CI、架构测试 | 依赖方向违规能自动拦截 | ✅ 完成 |
 | **P1 核心类型** | `nexus-core` 的类型：取消语义、事件、错误 | 负向测试通过 | ✅ 完成（11 个负向用例 + 9 个跨模块契约测试） |
-| **P2 基础设施** | `nexus-infra`（PG/Redis/S3/Milvus）、`nexus-repo` | 迁移可应用、集成测试绿 | ⬜ |
+| **P2 基础设施** | `nexus-infra`（PG/Redis/S3/Milvus）、`nexus-repo` | 迁移可应用、集成测试绿 | ✅ 完成（NEX-8..14；19 张 Phase 0 表在**空库**上可应用且可重复执行，50 个集成测试在 PostgreSQL 17 上全绿，CI 有 PG `services:` 且**真跑**集成测试） |
 | **P3 LLM 网关** | `nexus-llm`：供应商、预算、重试、熔断 | 预算裁剪与回退边界有测试 | ⬜ |
 | **P4 Agent 运行时** | `nexus-agent`：ReAct、上下文预算 | ReAct 循环有测试 | ⬜ |
 | **P5 协议层** | `nexus-api`：REST + SSE | SSE 半帧处理有测试 | ⬜ |
@@ -1898,6 +1966,27 @@ cd <nexus-agent>/examples && cargo run -p demo-lease-fencing
 P1 的完成判据「负向测试通过」由 NEX-4 承担、NEX-7 确认其**真的运行**
 （而非被跳过）—— `crates/nexus-core/tests/compile_fail.rs` 的 11 个用例
 在 CI 中逐个运行，无一被忽略。
+
+## 6.2.2 P2 的具体任务
+
+| 任务 | 产出 | 契约依据 |
+|---|---|---|
+| NEX-8 | PG 连接池与配置装配（URL 作为 secret 承载） | §4.3.3、§2.7 |
+| NEX-9 | 迁移基线 —— Phase 0 的 19 张核心表 | §3.9、§3.9.4 |
+| NEX-10 | Redis / S3 / Milvus 客户端（构造可离线测） | §4.3.3、§1.3 |
+| NEX-11 | 行类型（17 个）+ 基础仓储 | §4.2 差异 2、§5.4 |
+| NEX-12 | 租约与 `generation` fencing（`RunLease`） | §2.5.4、§3.4.2 |
+| NEX-13 | outbox 与幂等键（事务一致性） | §4.1.1、§4.1.2 |
+| NEX-14 | 收口：集成测试基座 + 架构文档同步 + CI 真跑 | §5.3、§5.4、§4.2 |
+
+P2 的完成判据「**迁移可应用、集成测试绿**」由 NEX-9 承担前者、NEX-14 确认后者
+**真的成立** —— 三条防伪防线：
+
+1. **集成测试基座在 CI 缺 `DATABASE_URL` 时 panic**（不是静默跳过）。
+2. **CI 增加「应用数据库迁移」步骤** —— PG 服务起的是空库，不建表就跑测试必然全红。
+3. **CI 解析 `cargo test` 输出**，断言各集成套件的测试数达阈值 —— 防止套件没被编进来。
+
+三者都用**注入故障**的方式验证过会红。
 
 ## 6.3 设计定稿的门槛
 

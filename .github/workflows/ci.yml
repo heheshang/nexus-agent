@@ -56,6 +56,20 @@ jobs:
         with:
           workspaces: . -> target
 
+      # ⚠️ 这一步是 **AC #14 的实质内容**，不是可选的优化。
+      #
+      # `postgres:17` 服务起的是**空库** —— 镜像只创建数据库，**不建任何表**。
+      # 而集成测试直接操作 `public` schema 的表 —— 空库上跑必然全红。
+      #
+      # 用 Rust 二进制（而不是 `psql` 依次跑 `.up.sql`）的原因：
+      # 迁移器已通过 `sqlx::migrate!` 嵌入二进制，版本记账（`_sqlx_migrations`）
+      # 由 sqlx 负责，**幂等**；走 psql 会绕过记账，迁移会被重复应用。
+      #
+      # 顺带断言 Phase 0 的表齐了 —— 「迁移跑完了」与「表建对了」是两件事，
+      # sqlx 会**静默忽略**文件名格式不符的迁移文件。
+      - name: 应用数据库迁移
+        run: cargo run --locked -p nexus-infra --bin apply-migrations
+
       # Cargo.lock 必须入库并与 manifest 同步。
       # 一旦有人手动改了版本号却没更新 lock，CI 立刻失败。
       - name: 校验依赖锁定纪律
@@ -81,7 +95,66 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: cargo test
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked 2>&1 | tee /tmp/test-output.txt
+
+      # ⚠️ 这一步验证 **AC #14 的后半句**：集成测试在 CI 里**真的跑**了。
+      #
+      # 「跳过」的测试在 `cargo test` 摘要里显示为 `passed` ——
+      # 所以「CI 全绿」**不能**证明「集成测试跑了」。
+      #
+      # 判据：从上一步的输出里找出每个**集成测试二进制**的
+      # `test result: ok. N passed`，断言 N 达到预期值。
+      #
+      # 为什么用「解析输出」而不是「再跑一遍」：
+      # 再跑一遍会重复付出编译与执行成本，而输出已经在手上了。
+      #
+      # 为什么逐个二进制断言而不是断言总数：
+      # 总数可以被**别的** crate 的测试凑够 ——
+      # 而「某个集成测试套件 0 passed」才是我们要防的那种假象。
+      #
+      # 为什么用 `grep -A` 而不是 awk 状态机：
+      # `cargo test` 的输出里，`Running tests/xxx.rs` 与它后面的
+      # `test result:` 行之间隔着「running N tests」与 N 行测试明细 ——
+      # 窗口得开得够大，容易随测试数量变化而出错。
+      #
+      # 所以改用**更稳**的信号：`running N tests` 那一行里的 N
+      # 就是该二进制的测试总数（= 通过数，因为失败会让 CI 直接红）。
+      # 它紧跟在 `Running` 行后面，取值稳定。
+      - name: 校验集成测试真的跑了
+        run: |
+          set -euo pipefail
+
+          check_suite() {
+            local suite="$1" min="$2"
+            local actual
+            actual=$(grep -A 3 -F "$suite" /tmp/test-output.txt \
+              | grep -m 1 -oE 'running [0-9]+ tests' \
+              | grep -oE '[0-9]+' || true)
+
+            if [ -z "$actual" ]; then
+              echo "✗ ${suite}：找不到测试数量 —— 该套件可能根本没被编进来。"
+              return 1
+            fi
+            if [ "$actual" -lt "$min" ]; then
+              echo "✗ ${suite}：只编入了 ${actual} 个测试（期望至少 ${min}）—— 有测试被跳过或没被编进来。"
+              return 1
+            fi
+            echo "✓ ${suite}：${actual} 个测试。"
+            return 0
+          }
+
+          failed=0
+          check_suite "tests/migration.rs"            7  || failed=1
+          check_suite "tests/lease_fencing.rs"       14  || failed=1
+          check_suite "tests/outbox_idempotency.rs"  10  || failed=1
+          check_suite "tests/schema_conformance.rs"    3  || failed=1
+          check_suite "tests/users_repository.rs"      9  || failed=1
+          check_suite "tests/sessions_repository.rs"   7  || failed=1
+
+          if [ "$failed" -ne 0 ]; then
+            echo "集成测试存在被跳过的情况 —— 「集成测试绿」是假象。"
+            exit 1
+          fi
 
   build:
     name: release build

@@ -166,6 +166,51 @@ else
 fi
 
 echo ""
+echo "── 规则 7：deps_of 与各 crate 的 Cargo.toml 必须一致 ──"
+# 为什么这条必需
+#
+# `deps_of` 是本脚本的**声明式依赖表** —— 规则 1/2/4/5 全部基于它判定。
+# 如果它与各 crate 实际的 `Cargo.toml` 漂移了，那些规则就变成
+# **在错误的依赖图上做正确的判定** —— 看起来全绿，实际什么都没拦住。
+#
+# 这不是假设性的风险：§5.3 的架构测试表曾把「`deps_of` ↔ `Cargo.toml`
+# 一致性核对」写成「已落地」，而脚本里**并没有**这条规则。
+# 文档声称与实现不符 —— 本身就是一种缺陷。
+#
+# 核对方式：逐 crate 比较「`Cargo.toml` 的 `[dependencies]` 里声明的
+# `nexus-*` 内部依赖」与「`deps_of` 声明的内部依赖」。
+# **集合相等**才算通过 —— 多一个、少一个都要报出来。
+violations=0
+for c in $ALL_CRATES; do
+    # 实际声明：读 Cargo.toml 的 [dependencies] 段。
+    actual=$(awk '
+        /^\[/ { in_deps = ($0 == "[dependencies]"); next }
+        !in_deps { next }
+        $1 ~ /^nexus-[a-z0-9-]+[.]workspace$/ {
+            name = $1
+            sub(/[.]workspace$/, "", name)
+            print name
+        }
+    ' "crates/$c/Cargo.toml" 2>/dev/null | sort | tr '\n' ' ')
+
+    # `grep -v '^$'` 在无匹配时返回 1 —— 在 `set -e` + `pipefail` 下会中断脚本。
+    # `nexus-core` 的依赖表是空的，正好会命中这个分支，所以必须 `|| true` 兜住。
+    declared=$(deps_of "$c" | tr ' ' '\n' | grep -v '^$' | sort | tr '\n' ' ' || true)
+
+    if [ "$actual" != "$declared" ]; then
+        echo "  ✗ ${c}：依赖声明不一致"
+        echo "      Cargo.toml : $actual"
+        echo "      deps_of    : $declared"
+        violations=$((violations + 1))
+    fi
+done
+if [ "$violations" -eq 0 ]; then
+    echo "  ✓ deps_of 与各 crate 的 Cargo.toml 一致"
+else
+    fail=1
+fi
+
+echo ""
 echo "── 实际依赖图（cargo tree 校验） ──"
 if cargo tree --workspace --prefix none --depth 1 > /dev/null 2>&1; then
     echo "  ✓ cargo tree 可解析，实际图与声明一致（cargo 自身会拒绝环）"

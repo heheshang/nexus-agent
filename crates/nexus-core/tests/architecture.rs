@@ -11,6 +11,9 @@
 //! | `sqlx_appears_only_in_data_access_layers` | §4.4 规则 3 |
 //! | `nexus_model_has_no_database_traces` | §4.2 差异 2 |
 //! | `capability_layer_does_not_depend_on_nexus_repo` | §4.1.2（防环） |
+//! | `nexus_repo_depends_only_on_capability_layer` | §4.1.2（正向：repo → 能力层） |
+//! | `nexus_repo_does_not_touch_workflow_runs` | §4.2 差异 1（负向：`nexus-repo` 不许碰） |
+//! | `workflow_runs_appears_only_in_execution_owned_crates` | §4.2 差异 1（允许集：全 workspace） |
 //!
 //! 设计文档 §5.2 还要求一类**负向测试**（用 `trybuild` 断言某段代码不能编译），
 //! 用于验证「取消语义靠类型保证」。那部分属于 P1（`nexus-core` 类型落地后）。
@@ -143,6 +146,63 @@ fn capability_layer_does_not_depend_on_nexus_repo() {
                 "{crate_name} 不得依赖 nexus-repo —— 依赖方向必须是 repo → 能力层"
             );
         }
+    }
+}
+
+/// §4.1.2 —— `nexus-repo` **只**依赖能力层（单向依赖的正向侧）。
+///
+/// # 与 [`capability_layer_does_not_depend_on_nexus_repo`] 的关系
+///
+/// 那条断言的是**反向**：能力层不得依赖 `nexus-repo`。
+/// 本条断言的是**正向**：`nexus-repo` 的内部依赖**全部**落在能力层里。
+///
+/// # 为什么必须断言「正向」
+///
+/// 只断言反向的话，`nexus-repo` 依赖 `nexus-service`（上层）也能通过 ——
+/// 那会形成 `service → repo → service` 的环。
+///
+/// `scripts/check-deps.sh` 规则 2 已经覆盖了「能力层不得依赖 service/api/cli」，
+/// 但它检查的是**能力层**那侧；`nexus-repo` 自己依赖上层**没有任何脚本覆盖**。
+///
+/// # 允许的两个例外
+///
+/// | crate | 为什么允许 |
+/// |---|---|
+/// | `nexus-core` | 依赖图的根 —— 所有 crate 都依赖它 |
+/// | `nexus-infra` | 数据访问层的基础设施（PG / Redis / S3 / Milvus）—— 同层，不是上层 |
+///
+/// `nexus-infra` **不是**能力层，但它也不是「上层」——
+/// 它是数据访问层，与 `nexus-repo` 平级。把它排掉会让这条断言
+/// 拒绝一个**正确**的依赖。
+#[test]
+fn nexus_repo_depends_only_on_capability_layer() {
+    /// 能力层 + 依赖图的根 + 同层的数据访问基础设施。
+    const ALLOWED: &[&str] = &[
+        // 依赖图的根
+        "nexus-core",
+        // 能力层
+        "nexus-config",
+        "nexus-model",
+        "nexus-observability",
+        "nexus-security",
+        "nexus-vector",
+        "nexus-llm",
+        "nexus-tool",
+        "nexus-rag",
+        "nexus-ingestion",
+        "nexus-capacity",
+        "nexus-memory",
+        // 同层的数据访问基础设施
+        "nexus-infra",
+    ];
+
+    for dep in internal_deps("nexus-repo") {
+        assert!(
+            ALLOWED.contains(&dep.as_str()),
+            "nexus-repo → {dep}：nexus-repo 只允许依赖能力层。\
+             依赖上层（service / api / cli / agent / workflow / execution / mcp / a2a）\
+             会形成环 —— 依赖方向必须是 repo → 能力层。"
+        );
     }
 }
 
@@ -288,6 +348,86 @@ fn nexus_repo_does_not_touch_workflow_runs() {
     assert!(
         violations.is_empty(),
         "workflow_runs 由 nexus-execution 独占 —— nexus-repo 不得引用：\n{}",
+        violations.join("\n")
+    );
+}
+
+/// §4.2 差异 1 —— `workflow_runs` **只允许**在 `nexus-execution` 出现。
+///
+/// # 为什么这条与已有的负向断言**不重复**
+///
+/// [`nexus_repo_does_not_touch_workflow_runs`] 是**负向**断言：
+/// 「`nexus-repo` 不得引用 `workflow_runs`」。
+///
+/// 但它**只管住了一个 crate**。`nexus-service` / `nexus-api` / `nexus-agent`
+/// 等任何其他 crate 引用 `workflow_runs`，那条测试**照样绿** ——
+/// 而那同样会破坏「只有执行层能写 `workflow_runs`」的前提。
+///
+/// 本条是**允许集**断言：**全 workspace** 扫描，除了 `nexus-execution`
+/// 与 `nexus-infra`（迁移基线的建表 DDL）之外，**任何** crate 的源码
+/// 都不许出现 `workflow_runs` / `workflow_step_runs`。
+///
+/// # 为什么只扫描 `src/`，不扫描 `tests/`
+///
+/// 架构测试**自己**必须提到表名 —— 断言的允许集里就写着
+/// `"workflow_runs"`。扫描 `tests/` 会让这条测试**把自己判成违规**。
+///
+/// 约束的对象是**生产代码** —— `src/` 里出现 `workflow_runs` 才意味着
+/// 「有 crate 在访问它」。`tests/` 里出现只意味着「有测试在断言它」。
+///
+/// # 允许 `nexus-infra` 的理由
+///
+/// `nexus-infra` 持有**迁移文件** —— `workflow_runs` 的表结构必须在
+/// 迁移里定义（否则表根本建不出来）。那是**建表**，不是**访问**。
+///
+/// # 允许 `nexus-execution` 的理由
+///
+/// 架构文档 §4.2 差异 1 明文规定：`workflow_runs` 由 `nexus-execution` 独占。
+///
+/// # 为什么剥离注释
+///
+/// 文档注释里写「本 crate 不碰 `workflow_runs`」是**说明性文字**，
+/// 不是数据库访问。扫描时必须剥离注释 —— 否则
+/// 「把边界写清楚」反而会让门禁红。
+#[test]
+fn workflow_runs_appears_only_in_execution_owned_crates() {
+    /// 允许引用 `workflow_runs` 的 crate。
+    const ALLOWED: &[&str] = &["nexus-execution", "nexus-infra"];
+
+    /// 被独占的表名。
+    const EXCLUSIVE_TABLES: &[&str] = &["workflow_runs", "workflow_step_runs"];
+
+    let crates_dir = workspace_root().join("crates");
+    let mut violations = Vec::new();
+
+    for crate_name in all_crates() {
+        if ALLOWED.contains(&crate_name.as_str()) {
+            continue;
+        }
+
+        let src_dir = crates_dir.join(&crate_name).join("src");
+        if !src_dir.exists() {
+            continue;
+        }
+
+        for file in walk_rs(&src_dir) {
+            let content = std::fs::read_to_string(&file).expect("读取源文件失败");
+            let code = strip_comments(&content);
+            for table in EXCLUSIVE_TABLES {
+                if code.contains(table) {
+                    violations.push(format!(
+                        "{}（crate `{crate_name}`）引用了 `{table}`",
+                        file.display()
+                    ));
+                }
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "`workflow_runs` / `workflow_step_runs` 只允许出现在 \
+         `nexus-execution`（独占方）与 `nexus-infra`（迁移 DDL）中：\n{}",
         violations.join("\n")
     );
 }

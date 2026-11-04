@@ -2,7 +2,7 @@
 
 架构文档 §6.1 的 P2 阶段：**`nexus-infra`（PG/Redis/S3/Milvus）、`nexus-repo`**。
 
-**状态：📋 任务拆解完成，待实现**
+**状态：✅ 完成（NEX-8 ~ NEX-14）**
 
 ## 完成判据
 
@@ -12,6 +12,29 @@
 
 1. **迁移可应用** —— `sqlx::migrate!` 能在空库上完整建表，且可重复执行（幂等）。
 2. **集成测试绿** —— 真实 PostgreSQL 上的行为层不变量测试通过。
+
+### 「绿」的**防伪**要求（NEX-14 确立）
+
+「集成测试绿」这个词本身是个**陷阱** —— 有三种方式可以让它**假绿**：
+
+| 假象形态 | 防线 |
+|---|---|
+| 没有 `DATABASE_URL` → 测试全部「跳过」 → 摘要显示 `passed` | 集成测试基座在 CI 环境**直接 panic** |
+| CI 的 PG 服务是**空库** → 表不存在 → 测试报错 | CI 增加「应用数据库迁移」步骤（`cargo run -p nexus-infra --bin apply-migrations`） |
+| 测试套件**根本没被编进来** | CI 解析 `cargo test` 输出，断言各集成套件的测试数达阈值 |
+
+三条防线都用**注入故障**的方式验证过会红。
+
+### 验证命令
+
+```bash
+# 应用迁移到空库（CI 里就是这么做的）
+DATABASE_URL=postgres://nexus:nexus@127.0.0.1:5432/nexus_test \
+  cargo run -p nexus-infra --bin apply-migrations
+
+# 跑集成测试
+DATABASE_URL=postgres://nexus:nexus@127.0.0.1:5432/nexus_test cargo test -p nexus-repo
+```
 
 ## 任务拆解
 
