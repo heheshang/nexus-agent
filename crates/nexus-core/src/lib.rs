@@ -17,8 +17,7 @@
 //! | [`id`] | 类型化 ID（18 种） | 架构文档 §2.8.1 |
 //! | [`cancel`] | 取消语义类型状态 | 架构文档 §2.1 |
 //! | [`event`] | 事件负载（12 种）+ 单写者事件流 | 架构文档 §2.2 |
-//!
-//! 后续模块（错误）见架构文档 §2.6。
+//! | [`error`] | 三层错误模型 + 42 个业务码 | 架构文档 §2.6 |
 //!
 //! # 依赖位置
 //!
@@ -26,10 +25,12 @@
 //! 它的依赖只有外部 crate —— `serde` / `uuid` / `thiserror` / `tokio-util` / `futures`。
 
 pub mod cancel;
+pub mod error;
 pub mod event;
 pub mod id;
 
 pub use cancel::{DetachedScope, PersistError, RequestScope};
+pub use error::{ALL_CODES, AppError, ErrorCode, ModelError, RetryPolicy, UserFacing};
 pub use event::{
     AgentEventKind, EVENT_NAMES, Event, EventChannel, EventPayload, EventSink, EventStream,
     EventStreamError, FinishReason, ToolStatus,

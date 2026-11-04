@@ -138,3 +138,34 @@ fn event_sink_requires_mutable_borrow() {
     let t = trybuild::TestCases::new();
     t.compile_fail("tests/compile_fail/event_sink_requires_mutable_borrow.rs");
 }
+
+/// §2.6.5 —— 内部原因**绝不外泄**。
+///
+/// `AppError` **刻意不实现 `Serialize`** —— 它带着 `cause`（内部原因，
+/// 可能含数据库口令、上游 URL 等）。要输出给客户端，只能给 `UserFacing`。
+/// 不实现 `Serialize` 从类型上消灭了「不小心把完整错误发给用户」的可能。
+///
+/// 期望的错误：
+/// ```text
+/// error[E0277]: the trait bound `AppError: Serialize` is not satisfied
+/// ```
+#[test]
+fn app_error_is_not_serializable() {
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/compile_fail/app_error_is_not_serializable.rs");
+}
+
+/// §2.6.5 —— `UserFacing` 在**类型上**无法携带内部原因。
+///
+/// `UserFacing` 的字段是**公有**的（协议层要读它们），但它只有两个字段 ——
+/// `code` 与 `message`。想加一个 `cause` 字段？编译器会拒绝。
+///
+/// 期望的错误：
+/// ```text
+/// error[E0560]: struct `UserFacing` has no field named `cause`
+/// ```
+#[test]
+fn user_facing_cannot_carry_cause() {
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/compile_fail/user_facing_cannot_carry_cause.rs");
+}
