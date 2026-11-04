@@ -1662,17 +1662,25 @@ Rust 的测试可以验证「某段代码**不能**编译」：
 
 | 测试 | 检验的设计条款 | 状态 |
 |---|---|---|
-| `workflow_runs` 只在 `nexus-execution` 出现 | §4.2 差异 1 | ⬜ P2 才有 `workflow_runs` |
+| `workflow_runs` 只在 `nexus-execution` 出现 | §4.2 差异 1 | ✅ 已落地（`nexus-repo` 的源码扫描架构测试，NEX-11） |
 | `nexus-model` 不含 `FromRow` / `sqlx::Type` | §4.2 差异 2 | ✅ 已有 |
 | `nexus-core` 零内部依赖 | §4.4 规则 2 | ✅ 已有 |
 | 能力层不依赖 `nexus-repo` | §4.1.2（防环） | ✅ 已有 |
-| `nexus-repo` 只依赖能力层（单向） | §4.1.2 | ⬜ P2 才有 |
+| `nexus-repo` 只依赖能力层（单向） | §4.1.2 | ✅ 已落地（`check-deps.sh` 规则 5 + `Cargo.toml` ↔ `deps_of` 一致性核对，NEX-11） |
+| 行类型列名与真实 schema 一致 | §3.9.3（`query_as` 运行期校验的代价） | ✅ 已落地（`nexus-repo` 的 `schema_conformance` 集成测试，NEX-11） |
 
 > **落地记录（2026-11-04，P1 完成）**：本表的后两项属于 **P2** ——
 > `workflow_runs` 的写入者与 `nexus-repo` 的依赖面都要等 P2 的
 > `nexus-infra` / `nexus-repo` 落地后才存在实体可查。
 > P1 期间 `nexus-core` 加了 `tokio-util` / `futures` 依赖，
 > 已确认**零内部依赖**规则仍然成立（外部 crate 不算内部依赖）。
+>
+> **落地记录（2026-11-04，NEX-11 完成）**：P2 的三项待办已补齐 ——
+> ① `nexus-repo` 的源码扫描证明它**不含** `workflow_runs` / `workflow_step_runs`；
+> ② 依赖方向经 `check-deps.sh` 规则 5 与 `deps_of` ↔ `Cargo.toml` 的逐 crate 比对确认；
+> ③ 新增 `schema_conformance` 集成测试 —— 它把「`query_as` 的运行期校验」
+> 这一决策的代价（列名写错要到运行时才炸）转成了**可执行的防线**：
+> 17 个行类型的列名集合必须与真实 PG schema 的列名集合**完全相等**。
 
 ## 5.4 行为层的检验：不变量测试
 
@@ -1693,6 +1701,10 @@ Rust 的测试可以验证「某段代码**不能**编译」：
 | ID 类型互不相同 | `TypeId` 去重后仍为 18 | ✅ 已验证（`nexus-core` 契约测试） |
 | 事件名清单不增不减 | 序列化后 `type` 字段比对 §2.2.4.1 表 | ✅ 已验证（`nexus-core` 契约测试） |
 | `nexus-model` 无数据库痕迹 | 源码扫描禁止 `FromRow` / `sqlx::` | ✅ 已验证 |
+| 行类型列名与真实 schema 一致 | 集成测试比对 `information_schema.columns` | ✅ 已验证（NEX-11 `schema_conformance`，17 个行类型逐列核对） |
+| 「查不到」不是错误 | 仓储返回 `Ok(None)`，仅 `require_*` 报错 | ✅ 已验证（NEX-11 `find_missing_user_returns_none`） |
+| 仓储错误不 panic | 全部走 `Result` + `AppError` | ✅ 已验证（NEX-11，`nexus-repo/src` 无 `unwrap` / `expect` / `panic!`） |
+| 归属校验下沉到 SQL WHERE | 越权查询返回 `None` 而非 403 | ✅ 已验证（NEX-11 `find_owned_rejects_other_users_session`） |
 | SQL 只读守卫 | AST 解析拒绝写操作 / 多语句 / CTE 写 | ✅ 已验证（`demo-sql-guard`） |
 | 消费者定义 trait 不产生环 | `repo → rag` 单向依赖 | ✅ 已验证（`demo-consumer-trait`） |
 
@@ -1938,6 +1950,12 @@ P1 的完成判据「负向测试通过」由 NEX-4 承担、NEX-7 确认其**�
 | **SSE 帧解码必须连分隔符一起切走**（否则死循环） | `examples/demo-sse-frames` 实测 |
 | **消费者定义 trait 可打断环**（`repo → rag` 单向） | `examples/demo-consumer-trait` 实测 |
 | **流式回退锁定点在 yield 之前** | `examples/demo-stream-fallback` 实测 |
+| **`sqlx` 的 `NUMERIC` 需要 `rust_decimal` feature**（`FLOAT8 ≠ NUMERIC`） | 编译实测 |
+| **17 个行类型的列名与真实 PG schema 完全一致** | `nexus-repo` 的 `schema_conformance` 实测 |
+| **`sqlx` 的 `try_from` 不接受 `Option<i64> → Option<UserId>`**（std 不提供该转换，孤儿规则也挡住补 impl） | 编译实测 |
+| **`CHAR(64)` 的 `bpchar` 会补尾随空格**，但比较时忽略空格 → Rust 侧必须 `trim_end` | 真实 PG 实测 |
+| **`query_as` + `FromRow` 的列名写错要到运行时才炸** → 必须有 schema 一致性测试兜底 | 负向实测（改错列名 → 测试精确报错） |
+| **PG 的 `messages.session_id` 外键**没有 `ON DELETE CASCADE` | 真实 PG 实测 |
 
 ## 附录 C · 尚未验证的设计条款
 

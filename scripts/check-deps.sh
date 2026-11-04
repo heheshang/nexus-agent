@@ -126,11 +126,36 @@ fi
 echo ""
 echo "── 规则 6：nexus-model 不含数据库痕迹（设计文档 §4.2 差异 2）──"
 violations=0
+
+# 6a. **依赖层**（编译期铁律）—— nexus-model 不得依赖 sqlx。
+#
+# 这是**最强的**保证：只要 Cargo.toml 里没有 sqlx，
+# nexus-model 的代码就**不可能**用上 `#[derive(FromRow)]`。
+#
+# 为什么必须有这一条：源码扫描是**词法**检查，它拦不住
+# 「通过 re-export 或宏间接引入」的情况。依赖层检查没有这个漏洞。
+if grep -qE '^sqlx' crates/nexus-model/Cargo.toml 2>/dev/null; then
+    echo "  ✗ crates/nexus-model/Cargo.toml 依赖了 sqlx"
+    violations=$((violations + 1))
+fi
+
+# 6b. **源码层** —— nexus-model 的**代码**（不含注释）里不得出现 sqlx 痕迹。
+#
+# ⚠️ 必须**排除注释**：文档注释里提到 `FromRow` / `sqlx::` 是**说明性文字**
+# （比如「本 crate 不含 FromRow」），不是数据库痕迹。
+# 早先的版本用裸 grep 扫描全文，会把这些说明文字误判成违规 ——
+# 那样写文档反而会让门禁红。
+#
+# 剥离方法：删掉每行 `//` 之后的内容（覆盖 `//`、`///`、`//!` 三种前缀），
+# 再扫描剩下的**真正的代码**。
+#
+# 注意：grep 无匹配时返回 1，在 `set -e` 下会中断脚本 —— 必须用 `|| true` 兜住。
 if [ -d crates/nexus-model/src ]; then
-    # 注意：grep 无匹配时返回 1，在 `set -e` 下会中断脚本 —— 必须用 `|| true` 兜住。
-    hits=$(grep -rnE 'FromRow|sqlx::|sqlx_macros' crates/nexus-model/src/ 2>/dev/null || true)
+    hits=$(find crates/nexus-model/src -name '*.rs' -type f -print0 \
+        | xargs -0 sed -e 's://.*::' \
+        | grep -nE 'FromRow|sqlx::|sqlx_macros' 2>/dev/null || true)
     if [ -n "$hits" ]; then
-        echo "$hits" | sed 's/^/  ✗ /'
+        echo "$hits" | sed 's|^|  ✗ crates/nexus-model/src（代码部分）: |'
         violations=$((violations + 1))
     fi
 fi

@@ -90,7 +90,11 @@ toml = "1.2.0"
 base64 = "0.23.1"
 
 # ---- 数据库 ----
-sqlx = { version = "0.9.0", default-features = false, features = ["chrono", "postgres", "runtime-tokio", "tls-rustls-ring", "json", "uuid", "migrate", "macros"] }
+# `rust_decimal` —— `model_configs.input_price` / `output_price` 是 `NUMERIC(12,6)`。
+# PG 的 NUMERIC 在二进制协议下有独立编码（不是 IEEE754），只有 decimal 类型能解码；
+# 用 `f64` 会在 sqlx 的类型兼容性检查处直接失败（`FLOAT8 ≠ NUMERIC`）。
+# 价格字段用精确十进制而不是浮点 —— 浮点的 15 位有效数字不足以保证金额精度。
+sqlx = { version = "0.9.0", default-features = false, features = ["chrono", "postgres", "runtime-tokio", "tls-rustls-ring", "json", "uuid", "migrate", "macros", "rust_decimal"] }
 redis = { version = "2.0.0-rc.2", features = ["tokio-comp", "connection-manager", "script"] }
 deadpool-redis = { version = "0.23.1", features = ["rt_tokio_1"] }
 
