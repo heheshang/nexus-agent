@@ -88,13 +88,20 @@ jobs:
       - name: 校验 backlog 组织纪律
         run: bash scripts/check-backlog.sh
 
-      # Spec 层组织纪律（AI-SDLC 三层模型 Tier 2）：
-      #   1. 每个 spec 目录必须有 spec.md + tasks.md + contracts/
-      #   2. tasks.md 的 T-NNN 与 backlog 任务双向对应
-      #   3. contracts/ 引用的测试必须真的存在（防「空头支票」契约）
-      #   4. 错误码白名单与 nexus-core 的实际码值一致（防 §6.3 已定稿条款漂移）
+      # Spec 层（Tier 2）组织纪律：spec.md + tasks.md + contracts/ 三件套齐全、
+      # tasks.md ↔ backlog 双向对应、契约引用的测试必须真实存在、
+      # 错误码白名单与 nexus-core 实际码值一致。
       - name: 校验 Spec 层组织纪律
         run: bash scripts/check-specs.sh
+
+      # 规则文件一致性：frontmatter 合法、规则引用的仓库路径真实存在、
+      # AGENTS.md 规则清单与 .cursor/rules/ 实际文件一一对应。
+      #
+      # 为什么必须 CI 强制：规则文件是**唯一的过程载体** ——
+      # 规则里引用一个不存在的脚本，等于给出一条无法执行的判据。
+      # 而「无法执行的判据」比「没有判据」更危险：它看起来是覆盖了的。
+      - name: 校验规则文件一致性
+        run: bash scripts/check-rules.sh
 
       - name: cargo fmt --check
         run: cargo fmt --all --check

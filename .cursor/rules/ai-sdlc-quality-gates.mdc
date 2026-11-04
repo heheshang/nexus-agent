@@ -1,0 +1,175 @@
+---
+description: AI-SDLC 质量门禁与评审规范（三级门禁、可执行门禁清单、评审门禁、provenance、override 语义）
+alwaysApply: false
+globs: ["crates/**", "backlog/**", "docs/**"]
+---
+
+# AI-SDLC 质量门禁与评审规范
+
+管辖阶段 **S5–S6**（三层验证与评审）。
+
+> 规范来源：`spec/spec.md` §5.3、`spec/policy.md`、`spec/metrics.md` §4。
+
+---
+
+## 1. 三级执行等级（enforcement level）
+
+**执行等级与策略逻辑解耦** —— 同一条规则在不同等级下行为不同。
+
+| 等级 | 行为 | 谁能覆盖 | 本仓库的映射 |
+|---|---|---|---|
+| **advisory** | 评估但**不拦截**；必须记录警告 | 不适用 | 文档同步、指标维度完整性、DoR 的 `Warn` 项 |
+| **soft-mandatory** | **拦截**；授权人可覆盖并记录理由 | `override.requiredRole` 匹配者，且必须写理由 | 覆盖率阈值、提交规范 |
+| **hard-mandatory** | **拦截，不可覆盖** —— 忽略 `override` 字段 | **无人** | 依赖方向违规、契约破坏、`unsafe_code`、CI 红 |
+
+**多门禁并存时全部通过才准入**；任一 `hard-mandatory` 失败即**整体拒绝**。
+
+---
+
+## 2. 评估流水线（准入门禁）
+
+AI-SDLC 的准入顺序是 Kubernetes admission controller 模型：
+
+```
+Request（PR / 部署）
+  1. Authentication   —— 谁是主体？（人 / AI agent / 服务账号 / bot）
+  2. Authorization    —— 该主体有权做这个动作吗？
+  3. Mutating Gates   —— 自动丰富请求（加标签、注入 provenance）
+  4. Validation       —— schema 与结构校验
+  5. Enforcing Gates  —— 逐条评估质量门禁规则
+  6. Admission        —— 放行或拒绝
+```
+
+**在本仓库的映射**：
+
+| 阶段 | 具体动作 |
+|---|---|
+| Authentication | 提交作者标识 + `Co-Authored-By` 尾注判定作者类型（AI / 人） |
+| Authorization | 评审人数门禁（§4） |
+| Mutating Gates | 提交信息带任务号、PR 描述带契约影响五问 |
+| Validation | `cargo fmt --check`、`clippy`、`check-deps.sh`、`check-naming.sh` |
+| Enforcing Gates | `cargo test --workspace --locked` |
+| Admission | 全部通过 → 可合并 |
+
+---
+
+## 3. 可执行门禁清单（CI 强制）
+
+`.github/workflows/ci.yml` 强制执行，**全部是 `hard-mandatory`**：
+
+| # | 命令 | 拦截什么 |
+|---|---|---|
+| 1 | `bash scripts/check-lock.sh` | 成员 crate 硬编码版本号；`Cargo.lock` 未入库 |
+| 2 | `bash scripts/check-deps.sh` | crate 依赖方向违规；`sqlx` 越界；依赖环 |
+| 3 | `bash scripts/check-naming.sh` | 标识符含中文 |
+| 4 | `bash scripts/check-backlog.sh` | 任务重复归档；完成态未标记 |
+| 5 | `bash scripts/check-specs.sh` | Spec 三件套缺失；`tasks.md` 与 backlog 漂移；契约引用不存在的测试；错误码白名单漂移 |
+| 6 | `bash scripts/check-rules.sh` | 规则文件 frontmatter 非法；引用的仓库路径不存在；规则清单漂移 |
+| 7 | `cargo fmt --all --check` | 格式化 |
+| 8 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | 静态检查有任何告警 |
+| 9 | `cargo test --workspace --locked` | 全量测试 |
+| 10 | 集成测试数量断言（CI 内联） | **集成测试被静默跳过** —— 「CI 全绿」是假象 |
+
+> 第 9 条是本仓库特有的 `hard-mandatory`：集成测试的判据是 `DATABASE_URL` 是否存在，
+> 不存在时**全部跳过**但在摘要里显示 `passed`。CI 额外解析测试输出，
+> 断言每个集成测试套件的**实际运行数量**达到预期下限。
+
+---
+
+## 4. 评审门禁
+
+### 4.1 最小评审要求
+
+| 规则 | 等级 | 判据 |
+|---|---|---|
+| **AI 产出代码需人工评审记录** | `hard-mandatory` | PR 上有 `approved` 的人工评审 |
+| **AI 作者的改动需额外一名评审** | `hard-mandatory` | AI 产出的 PR 评审人数 ≥ 2（含 1 名人工） |
+| **变更文件需同步文档** | `advisory` | 记录警告，不拦截 |
+| **AI 产出需 provenance 标注** | `hard-mandatory` | 提交信息含 `Co-Authored-By` 尾注 |
+
+**评审人独立性**：评审人不得是该改动的作者。
+AI 作者的改动**必须**有一名与作者不同的评审人。
+
+### 4.2 评审 remit（本仓库的三类）
+
+| Remit | 关注点 |
+|---|---|
+| **正确性** | 逻辑错误、边界条件、并发正确性、失败语义 |
+| **测试** | 覆盖缺口、断言有效性、测试是否真的在测东西（变异测试） |
+| **安全** | 注入、越权、敏感信息泄露、资源耗尽 |
+
+**评审发现的契约级问题不得就地修复** —— 升级（`ai-sdlc-decision-authority.mdc` §4.2），
+修复后**必须重跑评审**。
+
+### 4.3 评审迭代
+
+- `changes-requested` → 回到实现阶段，**最多迭代 2 轮**。
+- 第 2 轮仍有 critical / major 发现 → 停止，标记 **needs-human-attention**，
+  交人工处理。**不得**继续无限循环。
+- 评审结论必须**指向具体 AC 编号**（`ai-sdlc-artifacts.mdc` §2）。
+
+---
+
+## 5. Provenance（来源标注）
+
+**每个 AI 生成的产物都必须记录 provenance 元数据**（`spec/metrics.md` §4.1）：
+
+| 字段 | 必填 | 本仓库载体 |
+|---|---|---|
+| `model` | 是 | 提交信息 `Co-Authored-By` 尾注中的模型名 |
+| `tool` | 是 | `Co-Authored-By` 中的工具标识 |
+| `promptHash` | 是 | 不适用（本地开发不强制记录 prompt 哈希） |
+| `timestamp` | 是 | 提交时间戳（git 记录） |
+| `humanReviewer` | 否 | PR 评审记录 |
+| `reviewDecision` | 否 | PR 评审结论（`approved` / `rejected` / `revised`） |
+
+**最低要求**（`spec/policy.md` §5.1）：模型标识 + 工具标识 + 时间戳。
+
+**Provenance 记录一旦创建即不可变。**
+
+---
+
+## 6. Override 语义
+
+**只对 `soft-mandatory` 门禁生效。**
+
+| 条款 | 要求 |
+|---|---|
+| 授权 | 只有角色匹配 `override.requiredRole` 的人可以覆盖 |
+| 理由 | `override.requiresJustification` 为 `true`（默认）时，**必须**提供理由文本，否则拒绝 |
+| 审计 | 每次覆盖必须产生不可变审计条目：门禁名、actor、role、理由、时间戳、受影响资源 |
+| 有效期 | 覆盖**只作用于单次评估**。条件持续存在时下次评估会再次失败，需重新覆盖。**不得**持久化或自动续期 |
+
+**`hard-mandatory` 门禁的 `override` 字段被忽略** —— 任何人、任何角色都不能覆盖。
+
+**Guardrails 永不绕过** —— 被门禁拒绝时的正确动作是**登记任务补齐 sanctioned path**，
+不是绕过 hook、不是改门禁配置、不是本地跳过检查后声称通过。
+
+---
+
+## 7. 三层验证（每条新代码至少落在一层）
+
+| 层次 | 手段 | 用途 |
+|---|---|---|
+| **类型层** | `trybuild` 负向测试 | 断言「写错的代码**编译不过**」 |
+| **结构层** | 架构测试 / 依赖方向校验 | 依赖方向、无环、`sqlx` 收敛、源码扫描 |
+| **行为层** | 集成 / 不变量测试 | 语义不变量（如 fencing 拒绝僵尸写入） |
+
+**结构层断言的实践要点**：
+
+- 扫描源码的断言**必须剥离注释** —— 文档注释里解释「为什么不用 X」是正常文字，不是实际使用。
+- 这类断言的价值在于拦截**静默的行为退化**（编译通过但语义变了）。
+
+**变异测试**：当一条不变量「看起来显然」时，用变异测试验证断言真的有效 ——
+去掉该检查后，对应测试必须变红。
+
+---
+
+## 8. 相关文件
+
+| 文件 | 作用 |
+|---|---|
+| `ai-sdlc-implementation.mdc` | 提交前的实现侧纪律 |
+| `ai-sdlc-decision-authority.mdc` | 门禁失败时的升级路径 |
+| `ai-sdlc-observability.mdc` | 审计留痕与指标 |
+| `.github/workflows/ci.yml` | 门禁的可执行实现 |

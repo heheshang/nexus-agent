@@ -1,0 +1,154 @@
+---
+description: AI-SDLC Agent 角色与协作规范（角色定义、编排模式、handoff 契约、审计轨迹）
+alwaysApply: false
+---
+
+# AI-SDLC Agent 角色与协作规范
+
+管辖阶段 **S4–S6**（实现到评审之间的多代理协作）。
+
+> 规范来源：`spec/agents.md`、`spec/spec.md` §5.2。
+
+---
+
+## 1. 角色定义：Role-Goal-Backstory
+
+每个代理角色必须声明三要素，缺一不可：
+
+| 要素 | 内容 | 反例 |
+|---|---|---|
+| **Role** | 角色定位 | 「万能助手」 |
+| **Goal** | 要达成的目标（可判定） | 「做好工作」 |
+| **Backstory** | 职责边界的语境说明 | 无 |
+
+**额外必声明**：
+
+- **Tools** —— 该角色允许使用的工具集。**最小权限**：不给用不到的工具。
+- **Constraints** —— 硬约束（如「不得修改 `nexus-model`」）。
+
+**本仓库的固定角色**：
+
+| 角色 | Goal | 硬约束 |
+|---|---|---|
+| **Developer** | 按任务 AC 实现改动并通过全部六道门禁 | 不得改已定稿契约；不得越权改依赖方向 |
+| **Code Reviewer** | 找出逻辑错误与边界缺陷 | 只评审不修复 |
+| **Test Reviewer** | 评估覆盖缺口与断言有效性 | 只评审不修复 |
+| **Security Reviewer** | 找出注入 / 越权 / 泄露 / 资源耗尽 | 只评审不修复 |
+| **Refinement Reviewer** | 判定 DoR 的语义门禁（Stage B） | 只判定不实现 |
+
+**「只评审不修复」是硬约束**：评审者一旦开始改代码，评审就失去独立性，
+且改动绕过 DoR 与门禁。
+
+---
+
+## 2. 编排模式
+
+| 模式 | 形态 | 本仓库用途 |
+|---|---|---|
+| **Sequential** | A → B → C | 主流程：实现 → 评审 → 交付 |
+| **Parallel** | A ∥ B ∥ C | 三类评审**并行**执行 |
+| **Hierarchical** | 主管 → 子代理 | 特性拆解为多个任务 |
+| **Swarm** | 去中心化协作 | 不采用（不可预测，难审计） |
+| **Hybrid** | 顺序 + 局部并行 | **本仓库默认**：实现串行，三评审并行 |
+
+**并行评审的正确形态**：
+
+- 三个评审代理**必须并行发出**（同一条消息里发出），不是串行等待。
+- 每个评审代理的产出独立，**不得互相引用**（避免意见污染）。
+- 汇总由**独立的汇总步骤**做，不得由某个评审代理代劳。
+
+---
+
+## 3. Handoff 契约
+
+**代理间的交接必须当作版本化 API 契约处理。**
+每次交接必须产出符合契约的、可校验的、可审计的结构化产物。
+
+```yaml
+handoffContract:
+  id: "impl-to-review-v1"
+  version: "1.0.0"
+  schema:
+    type: object
+    required: [commitSha, filesChanged, verifications, summary]
+    properties:
+      commitSha: { type: string }
+      filesChanged: { type: array, items: { type: string } }
+      verifications:
+        type: object
+        properties:
+          build: { type: string }
+          test: { type: string }
+          lint: { type: string }
+          format: { type: string }
+      summary: { type: string, maxLength: 5000 }
+```
+
+### 3.1 校验
+
+**交接载荷必须先按契约 schema 校验再接受。**
+不合法载荷必须被拒绝，并指明**哪些字段**未通过。
+
+### 3.2 版本化
+
+| 变更 | 兼容性 | 版本 |
+|---|---|---|
+| 新增可选字段 | 兼容 | minor |
+| 新增必填字段 | **破坏性** | major |
+| 删除字段 | **破坏性** | major |
+
+生产者必须声明自己产出的是哪个契约版本；消费者必须校验兼容性。
+
+### 3.3 审计
+
+每次交接必须留下**不可变**的审计条目（`ai-sdlc-observability.mdc` §3）。
+
+---
+
+## 4. 交接的结构化返回
+
+代理之间的产出**必须结构化**，禁止自由散文：
+
+```json
+{
+  "commitSha": "abc123",
+  "filesChanged": ["crates/nexus-llm/src/retry.rs"],
+  "verifications": { "build": "ok", "test": "ok", "lint": "ok", "format": "ok" },
+  "summary": "实现指数退避 + 抖动重试",
+  "notes": ""
+}
+```
+
+**解析失败的处理**：无法解析的结构化返回**不得**被"善意补全"。
+报告方必须如实报告 `approved: false` / `failed: true`，
+并附上原始返回 —— **禁止编造或软化结论**。
+
+---
+
+## 5. 评审汇总的独立性
+
+| 规则 | 原因 |
+|---|---|
+| 汇总者**不是**任一评审者 | 避免单一视角偏置 |
+| 汇总**基于各评审自己的裁决** | 不得由汇总者"综合感觉" |
+| 任一评审者返回不可解析的裁决 → 该评审计为**未通过** | 静默通过是最危险的失败模式 |
+| `critical` / `major` 发现 → 必须回到实现阶段 | 不能"下次再说" |
+
+---
+
+## 6. 提示与上下文卫生
+
+- **提示必须自足**：被派发的代理**不应**依赖父会话的隐式上下文。
+  必要信息（任务路径、AC、约束、验收命令）必须**显式写入**提示。
+- **确定性优先**：能用脚本判定的，不要交给模型判定（DoR Stage A / Stage B 的分层原则）。
+- **上下文预算**：大 diff / 大文件不要整份塞进提示 —— 指名路径，让代理自己读。
+
+---
+
+## 7. 相关文件
+
+| 文件 | 作用 |
+|---|---|
+| `ai-sdlc-quality-gates.mdc` | 评审门禁与迭代上限 |
+| `ai-sdlc-autonomy.mdc` | 各角色的自治等级与批准要求 |
+| `ai-sdlc-observability.mdc` | 审计留痕 |

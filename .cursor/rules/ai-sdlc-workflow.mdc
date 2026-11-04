@@ -1,22 +1,68 @@
 ---
-description: AI-SDLC 研发流程规范（DoR 门禁、Spec 驱动、质量门禁、决策权威）
+description: AI-SDLC 研发流程总纲（生命周期阶段表、规则索引、权威顺序）
 alwaysApply: true
 ---
 
-# AI-SDLC 研发流程规范
+# AI-SDLC 研发流程总纲
 
 本项目的一切代码编写**必须**遵循 AI-SDLC 规范。
-规范来源：本机插件仓库 `~/.claude/plugins/marketplaces/ai-sdlc/`（`spec/` 规范性文档，`docs/concepts/` 解释性文档，`spec/rfcs/` RFC）。
 
-> 本仓库**尚未安装** AI-SDLC 管道（无 `.ai-sdlc/`、无 `backlog/`、`ai-sdlc` CLI 不在 PATH）。
-> 因此本规范是**方法论适配**：条款语义严格照搬 AI-SDLC，落地载体见 §2.1。
-> 真正跑通管道需要另行 `ai-sdlc init` 接入 —— 届时本文件与 `.ai-sdlc/` 配置并存，冲突以 `.ai-sdlc/` 为准。
+**规范来源**：本机插件仓库 `~/.claude/plugins/marketplaces/ai-sdlc/`
+（`spec/` 规范性文档、`~/.claude/plugins/marketplaces/ai-sdlc/docs/concepts/` 解释性文档、`spec/rfcs/` RFC）。
+本仓库**尚未安装** AI-SDLC 管道（无 `.ai-sdlc/`、`ai-sdlc` CLI 不在 PATH），
+因此本规范是**方法论适配**：条款语义严格照搬 AI-SDLC，落地载体见 §4。
+真正跑通管道需要另行 `ai-sdlc init` 接入 —— 届时本文件与 `.ai-sdlc/` 配置并存，
+冲突以 `.ai-sdlc/` 为准。
 
 ---
 
-## 1. 任务分层：RFC → Spec → Task
+## 1. 权威顺序
 
-AI-SDLC 是**决策引擎**，采用三层产出模型（`docs/concepts/spec-driven.md`）。写代码前先确定本次工作处于哪一层：
+| 序 | 来源 | 管辖范围 |
+|---|---|---|
+| 1 | `docs/architecture/2026-11-04-nexusagent-rust-architecture-design.md` | **架构与契约的唯一权威**（错误码表、事件清单、ID 类型表、crate 边界） |
+| 2 | `.cursor/rules/ai-sdlc-*.mdc` | **研发流程规范**（本组文件） |
+| 3 | `.cursor/rules/rust-code-standards.mdc` | Rust 代码规范（架构文档派生） |
+| 4 | `.cursor/rules/language.mdc` | 语言约定 |
+
+冲突时**以序号小的为准**，并且**不要静默选一个** —— 指出冲突并请求决策。
+
+---
+
+## 2. 全生命周期阶段表
+
+**每一阶段都必须有明确的「进入条件 → 产出物 → 退出条件」。**
+缺任何一项即视为该阶段未完成，不得进入下一阶段。
+
+| # | 阶段 | 进入条件 | 产出物 | 退出条件（可判定） | 失败处理 |
+|---|---|---|---|---|---|
+| **S0** | 需求捕获 | 有诉求（口头/文档/issue 均可） | 诉求记录 | 诉求能被归类到 §3 的某一层 | 信息不足 → 提问；勿擅自开工 |
+| **S1** | 分层判定 | 诉求已记录 | 层级结论（RFC / Spec / Task） | 层级已判定且**落在 Task 层** | 无法判定 → 升级（`ai-sdlc-decision-authority.mdc` §4） |
+| **S2** | 产出物编写 | 层级已判定 | RFC / `spec.md`+`plan.md`+`tasks.md`+`contracts/` / 任务文件 | 产出物落盘且**引用可解析** | 产出物不全 → 补齐，不得跳到 S3 |
+| **S3** | DoR 门禁 | 产出物落盘 | DoR 判定（pass / needs-clarification / blocked） | 七项门禁**全部通过** | 不通过 → 退回 S2 澄清；**不得开工** |
+| **S4** | 实现 | DoR 通过 | 代码 + 测试 + 提交 | 六道门禁**本地全绿** | 门禁红 → 修复；`hard-mandatory` 不可覆盖 |
+| **S5** | 三层验证 | 实现完成 | 类型层 / 结构层 / 行为层证据 | 每条新代码**至少落在一层** | 无覆盖 → 补测试，不得进入 S6 |
+| **S6** | 评审 | S5 通过 | 评审结论（approved / changes-requested） | 评审门禁通过（含 provenance + 评审人数） | changes-requested → 回到 S4，最多迭代 2 轮 |
+| **S7** | 合并与交付 | 评审通过 | 提交历史 + PR + 任务归档 | 提交在 `main` 上，任务移入 `backlog/completed/` | 冲突 → 手工解；**不得自动解** |
+| **S8** | 部署与运维 | 交付完成 | 运行配置 + 迁移 + 监控项 | 变更可观测、可回滚 | 生产故障 → 回滚 + 事故记录 |
+| **S9** | 度量与校准 | 周期结束 | 指标快照 + 流程校准结论 | 指标口径完整，门禁/路由按数据调整 | 指标缺失 → 补齐（`advisory`，不拦截） |
+
+**阶段不可跳过。** S1→S3 与 S4→S6 是两道硬边界：前者防「交付错误的东西」，
+后者防「无人审查的变更进入 `main`」。
+
+**跨阶段的关键交接**：
+
+- S3→S4：DoR 判定必须**先于**任何代码写入。判定记录写进任务文件。
+- S6→S7：评审发现的**契约级问题**（错误码 / 事件 / ID 类型 / crate 边界）
+  不得就地修复 —— 升级（`ai-sdlc-decision-authority.mdc` §4.2），修复后**必须重跑评审**。
+- S7→S8：合并前确认迁移可回滚、配置项有 `NX_` 映射、错误码与事件契约文档已同步。
+
+---
+
+## 3. 任务分层：RFC → Spec → Task
+
+AI-SDLC 是**决策引擎**，采用三层产出模型（`~/.claude/plugins/marketplaces/ai-sdlc/docs/concepts/spec-driven.md`）。
+写代码前先确定本次工作处于哪一层：
 
 | 层 | 产物 | 适用场景 | 缺失时的动作 |
 |---|---|---|---|
@@ -25,143 +71,61 @@ AI-SDLC 是**决策引擎**，采用三层产出模型（`docs/concepts/spec-dri
 | **Tier 3 · Task** | 通过 DoR 门禁的待办任务 | 单个 PR 规模的交付物 | 直接做 |
 
 - 层级**独立可用**，不强制向上遍历；**任何工作都不能跳过 Task 层**。
-- 本项目架构文档 `docs/architecture/2026-11-04-nexusagent-rust-architecture-design.md` 承担 **Spec 层契约**；每个 PR 属于 Task 层。
+- 本项目架构文档 `docs/architecture/2026-11-04-nexusagent-rust-architecture-design.md`
+  承担 **Spec 层契约**；每个 PR 属于 Task 层。
+- 判据：**存在合理工程师会就正确做法产生分歧** → 升到 RFC；
+  **一个特性能拆成多个任务** → 升到 Spec；否则直接进 Task。
+
+详见 `ai-sdlc-artifacts.mdc`。
 
 ---
 
-## 2. DoR 门禁（Definition of Ready）
+## 4. 规则文件索引
 
-任何任务进入实现前，必须通过 DoR 的**七项检查**（`spec/rfcs/RFC-0011-definition-of-ready-gate.md` §4.1），逐项二元判定：
-
-| # | 门禁 | 通过条件 | Stage A 确定性判据 |
-|---|---|---|---|
-| 1 | 验收标准可二元测试 | 每条 AC 能写成 5 分钟内可判定的通过/失败检查 | AC 数量 ≥1 且 ≤20，且均非空 |
-| 2 | 正文无未决标记 | 无占位符残留 | 正则 `\b(TBD\|TODO\|XXX\|FIXME\|\?\?\?)\b`，另查 `not sure` / `we'll figure out` / `decide later` |
-| 3 | 指名引用可解析 | 每个文件 / PR / issue / 系统 / 人都可定位 | markdown 链接可达；`#NN` 可解析；`RFC-NNNN` 文件存在 |
-| 4 | 范围有界 | 一句话能描述交付物，落在一个 PR 的合理 diff 规模内 | （纯语义，Stage B） |
-| 5 | 受影响面被指名 | 明确到文件路径 / 路由 / 组件 / 数据表 | 含文件路径或路由模式或系统标识 |
-| 6 | 完成态可描述 | 能用一句话回答「上线后使用者可以 ___」 | （纯语义，Stage B） |
-| 7 | 无隐形依赖 | 前置工作要么已完成，要么有已登记的任务链接 | 匹配「requires / depends on / after X ships」并验证关联任务存在 |
-
-**评估顺序**：Stage A（确定性）**永远先跑**，通过后才跑 Stage B（语义）。**默认严重度是 Block** —— 任一项不通过即「未就绪」，不得进入实现。
-
-> 违反此门禁的失效模式：**每个环节都觉得自己做对了，但交付的是错误的东西** —— AC 模糊 → 实现跑偏 → 评审按同一条模糊 AC 判过 → 合并后才发现。
-
-### 2.1 本仓库的 DoR 载体
-
-AI-SDLC 用 `backlog/tasks/*.md` 承载任务。本仓库采用**等价的轻量载体**：
-
-```
-backlog/tasks/<NEX-<n>> - <slug>.md
-```
-
-- 编号前缀 `NEX-`，与 AI-SDLC 的 `AISDLC-<n>` 同构（`id` / `title` / `status` / `labels` / `dependencies` / `references` frontmatter + `## Description` + `## Acceptance Criteria`）。
-- 文件名为 ASCII，含空格用 `-` 连接。
-- 提交信息末尾引用任务号：`feat(core): 增加取消语义类型状态 (NEX-101)`。
-- 任务完成后移入 `backlog/completed/`。
-
----
-
-## 3. 质量门禁与执行等级
-
-按 AI-SDLC `spec/spec.md` §5.3 与 `spec/policy.md` 定义等级，本项目映射：
-
-| 等级 | 含义 | 本项目对应门禁 |
+| 文件 | 管辖阶段 | 核心内容 |
 |---|---|---|
-| `advisory` | 记录不拦截 | 文档同步、指标维度完整性 |
-| `soft-mandatory` | 拦截，授权人可覆盖并记录理由 | 覆盖率、提交规范 |
-| `hard-mandatory` | 拦截，不可覆盖 | 依赖方向违规、契约破坏（错误码/事件/ID）、`unsafe_code`、CI 红 |
+| `ai-sdlc-workflow.mdc` | S0–S9 | 本文件：权威顺序、生命周期阶段表、分层判定 |
+| `ai-sdlc-artifacts.mdc` | S1–S2 | 三层产出物、DoR 载体、backlog 组织纪律、spec/status 分离 |
+| `ai-sdlc-dor-gate.mdc` | S3 | 七项门禁、Stage A/B、严重度、澄清回路 |
+| `ai-sdlc-implementation.mdc` | S4 | 契约影响分析、禁止事项、实现纪律、变更面控制 |
+| `ai-sdlc-quality-gates.mdc` | S5–S6 | 门禁分级、可执行门禁清单、评审门禁、provenance、override 语义 |
+| `ai-sdlc-decision-authority.mdc` | 全阶段 | 决策三分类、升级流程、OQ 禁令、五步法、范围纪律 |
+| `ai-sdlc-autonomy.mdc` | 全阶段 | 自治等级、晋级/降级、复杂度路由、任务路由模式 |
+| `ai-sdlc-agents.mdc` | S4–S6 | Agent 角色、编排模式、handoff 契约、审计轨迹 |
+| `ai-sdlc-adapters.mdc` | S0–S8 | 外部系统边界、适配器接口契约、凭据与配置处理 |
+| `ai-sdlc-observability.mdc` | S8–S9 | 指标维度、provenance 记录、审计留痕、留存与访问 |
+| `rust-code-standards.mdc` | S4–S5 | Rust 代码规范（架构文档派生） |
+| `language.mdc` | 全阶段 | 语言约定（始终用简体中文回答） |
 
-**多门禁并存时全部通过才准入**；任一 `hard-mandatory` 失败即整体拒绝。
+**规则文件的一致性由 `bash scripts/check-rules.sh` 校验**（frontmatter 合法、
+引用的仓库路径真实存在、`AGENTS.md` 规则清单与实际文件一一对应）。
 
-**评审门禁**（`spec.md` §5.3 reviewer-based rule）：AI 产出代码需人工评审记录；AI 作者的改动需**额外一名评审**。
-
-**Provenance（来源标注）**：`spec.md` §5.3 provenance-based rule 要求 AI 生成代码标注来源 —— 提交信息带 `Co-Authored-By: Claude <Model> <noreply@anthropic.com>` 尾注。
-
-本仓库的可执行门禁（`.github/workflows/ci.yml` 强制）：
-
-1. `bash scripts/check-lock.sh` —— 依赖锁定纪律（成员 crate 不得硬编码版本号；`Cargo.lock` 入库）。
-2. `bash scripts/check-deps.sh` —— crate 依赖方向铁律。
-3. `bash scripts/check-naming.sh` —— 标识符不得含中文（Rust 代码规范 §11）。
-4. `cargo fmt --all --check` —— 格式化。
-5. `cargo clippy --workspace --all-targets --locked -- -D warnings` —— 静态检查零告警。
-6. `cargo test --workspace --locked` —— 全量测试通过。
-
----
-
-## 4. 决策权威与升级
-
-**权威来自仓库，不来自转述。** `main` 上的决策记录才构成授权；尚未进入 `main` 的记录不是授权。
-
-### 4.1 决策三分类
-
-| 类 | 判据 | 处理 |
-|---|---|---|
-| **(a) decide-and-proceed** | 可低成本回滚、影响面小、不触碰信任链/治理控制 | 按 rubric 自行判定，记录决策，立即应用 |
-| **(b) timeboxed** | 难以回滚、影响面大、或**削弱**治理/信任链控制 | 记录决策并附 `--timebox` + `--autonomous-fallback`；时间盒到期前无人工干预才应用 |
-| **(c) operator-only** | 法律与许可、money、账号与凭据、只能以操作者身份执行的动作 | **绝不自行决定**。升级并**只搁置该任务**，其余任务继续 |
-
-**推导顺序**（取最严）：① 可逆性 → 不能低成本回滚则至少 (b)；② 影响面 → 广泛则至少 (b)；③ 控制变更 → 削弱信任链/治理控制是 (b)；需要操作者身份/金钱/法律/凭据是 (c)。
-
-**收紧控制不算削弱**（与已有决策一致即 (a)）。**Guardrails 与 hooks 永不绕过** —— 被门禁拒绝时正确动作是**登记任务补齐 sanctioned path**，不是绕过 hook。
-
-### 4.2 升级流程
-
-- **阻塞性开放问题**：停止实现 → 升级并列出 RFC 编号、问题与候选选项 → 不得在代码或注释里顺手决定。
-  **禁止**添加 `**Resolution:**` / `RESOLVED:` 标记，禁止用设计决策替换 OQ，禁止用代码隐式解决 OQ。OQ 的解决权专属操作者。
-- **非阻塞性开放问题**：可在 PR 说明中写明所采用的假设。
-- **Away rule**：操作者不在场时**不得**发起阻塞式提问；问题交给上层决策流程处理。
-- **Velocity**：任何拒绝都必须给出**代理可自行执行的下一步**（一条 sanctioned 命令 / 一个配置键值 / 一次升级），不得以拒绝终结任务。
+**产出物层的门禁由 `bash scripts/check-backlog.sh`（Task 层）与
+`bash scripts/check-specs.sh`（Spec 层）校验**。
 
 ---
 
-## 5. 五步法（任何修复或新增规则前）
+## 5. 不可协商项（摘要）
 
-按顺序执行并**逐条具名说明**：**质疑需求 → 删除 → 简化 → 加速 → 最后才自动化**。
+以下条款在**全部**规则文件中重复出现，因为它们没有例外：
 
-期望产出一段评审文字：
-
-```markdown
-**Five-step review (requirements first).** 1. Requirement questioned: <需求及其来源>. 2. Deleted: <删除的部分，或「无可删」及原因>. 3. Simplified or optimised: <简化后>. 4. Accelerated: <周期变化>. 5. Automated: <最后自动化了什么>.
-```
-
-本项目的直接体现：架构文档 §0.2 明确「连同参考实现的答案一起抄」是移植时最常见的错误 —— 先质疑，再动手。
-
----
-
-## 6. 自治等级与路由
-
-- 代理必须以**满足其职能的最低自治等级**行事（Level 0 Observer / 1 Junior / 2 Senior / 3 Principal，`spec/autonomy.md`）。
-- 不得在未通过晋级流程前以 Level 2/3 行事。
-- 任务路由：完全自治（`fully-autonomous`）仅限 Level 2/3；默认 `ai-with-review`（AI 产出 + 人工批准）。
+1. **权威来自仓库，不来自转述** —— `main` 上的决策记录才构成授权（`ai-sdlc-decision-authority.mdc` §1）。
+2. **Guardrails 与 hooks 永不绕过** —— 被门禁拒绝时，正确动作是补齐 sanctioned path。
+3. **OQ 解决权专属操作者** —— 不得添加 `**Resolution:**` / `RESOLVED:` 标记。
+4. **不静默偏离** —— 实现与设计文档冲突时，先说明冲突点并请求决策。
+5. **不扩大范围** —— 评审/审计类任务发现后续工作，只提建议并停下。
+6. **Away rule** —— 操作者不在场时不发起阻塞性提问。
+7. **Velocity** —— 任何拒绝都必须给出代理可自行执行的下一步。
 
 ---
 
-## 7. 范围纪律
-
-- **不扩大范围**：评审 / 审计 / 只读任务若发现后续工作，只提出建议并**停下**，等待授权后再登记任务或开 PR。
-- **不静默偏离**：实现与设计文档冲突时，先说明冲突点并请求决策，不得在代码里顺手定一个。
-- 架构文档 §6.3 的**已定稿条款**（取消语义、事件清单、错误码表、ID 类型、crate 边界、MCP/A2A 层归属、`service → execution` 依赖形态）**不得在实现中重新决定**。
-
----
-
-## 8. 提交与 Git Flow
-
-- **始终 rebase** 到 `main`，**绝不把 `main` merge 进来**，保持线性历史。
-- 提交信息用 Conventional Commits，标题末尾带任务号，并带 `Co-Authored-By` 尾注。
-- 提交前本地跑通全部六道门禁；`ci.yml` 的结果就是准入结果。
-- 每个交付物必须能被**可执行断言**覆盖 —— 见架构文档 §5（类型层负向测试 / 结构层架构测试 / 行为层不变量测试）。
-- 契约类改动（错误码、事件类型、ID 类型）必须同步更新契约测试与文档表格，并标注**破坏性变更**还是兼容变更。
-
----
-
-## 9. 相关文件
+## 6. 相关文件
 
 | 文件 | 作用 |
 |---|---|
 | `AGENTS.md` | 项目级代理指令入口 |
-| `.cursor/rules/ai-sdlc-workflow.mdc` | 本规则（流程与门禁） |
-| `.cursor/rules/rust-code-standards.mdc` | Rust 代码规范（架构文档派生） |
-| `.cursor/rules/language.mdc` | 语言约定 |
-| `backlog/tasks/` | DoR 任务载体 |
+| `docs/operations/ai-sdlc-workflow-handbook.md` | 人类可读的流程手册（叙事版） |
+| `backlog/tasks/` | DoR 任务载体（Task 层产出） |
+| `backlog/README.md` | 任务文件格式与生命周期 |
+| `scripts/check-rules.sh` | 规则文件一致性校验 |
 | `docs/architecture/2026-11-04-nexusagent-rust-architecture-design.md` | 架构与契约的**唯一权威** |

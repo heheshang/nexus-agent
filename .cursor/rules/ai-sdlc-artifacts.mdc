@@ -1,0 +1,209 @@
+---
+description: AI-SDLC 产出物规范（RFC/Spec/Task 三层载体、backlog 组织纪律、spec/status 分离）
+alwaysApply: false
+globs: ["backlog/**", "docs/**"]
+---
+
+# AI-SDLC 产出物规范
+
+管辖阶段 **S1–S2**（分层判定与产出物编写）。
+分层判定的**入口**见 `ai-sdlc-workflow.mdc` §3。
+
+---
+
+## 1. 三层产出的载体
+
+| 层 | AI-SDLC 标准载体 | 本仓库载体 |
+|---|---|---|
+| **Tier 1 · RFC** | RFC markdown（`spec/rfcs/RFC-NNNN-*.md`） | `docs/rfcs/NEX-RFC-<n> - <slug>.md` |
+| **Tier 2 · Spec** | `spec.md` + `plan.md` + `tasks.md` + `contracts/` | `docs/specs/<feature>/{spec.md,tasks.md,contracts/}` |
+| **Tier 3 · Task** | `backlog/tasks/*.md` | `backlog/tasks/NEX-<n> - <slug>.md` |
+
+> Tier 2 的 `plan.md` 在 AI-SDLC 标准里是四件套之一，但**本仓库不强制** ——
+> 实施顺序与依赖已由 `tasks.md` 的 `T-NNN` + `backlog/` 的 `dependencies` 表达。
+> 详见 §4。
+
+**编号前缀**：`NEX-` 与 AI-SDLC 的 `AISDLC-<n>` 同构。
+RFC 用 `NEX-RFC-<n>`，避免与任务号混淆。
+
+**目录约定**：
+
+- `backlog/tasks/` —— 进行中的任务
+- `backlog/completed/` —— 已交付并合入的任务
+- `docs/rfcs/` —— Tier 1 决策文档
+- `docs/specs/` —— Tier 2 契约包
+- `docs/architecture/` —— **架构权威**（不是 Tier 2 产物，是被所有层引用的定稿条款）
+
+---
+
+## 2. Task 层：任务文件格式
+
+frontmatter 遵循 AI-SDLC `spec/schemas/backlog-task.v1.schema.json` 的字段语义
+（`id` / `title` / `status` / `assignee` / `labels` / `priority` / `dependencies` / `references`）：
+
+```markdown
+---
+id: NEX-101
+title: "feat(core): 增加取消语义类型状态"
+status: To Do
+assignee: []
+labels: [core, typestate]
+priority: medium
+dependencies: []
+references:
+  - "docs/architecture/2026-11-04-nexusagent-rust-architecture-design.md §4.1"
+---
+
+## Description
+
+<问题描述：谁需要什么，为什么现在做>
+
+## Acceptance Criteria
+
+- [ ] #1 <可二元判定的验收条件>
+- [ ] #2 <可二元判定的验收条件>
+```
+
+**状态取值**：`To Do` / `In Progress` / `Done` / `Needs Clarification`。
+
+**文件名**：ASCII，空格用 `-` 连接，slug 用小写短横线；
+文件名与 frontmatter `id` 必须一致。
+
+**AC 编号**：`- [ ] #N` 逐条编号。编号在评审阶段是**引用锚点** ——
+评审意见必须指向具体的 AC 编号，否则无法判定该 AC 是否被满足。
+
+**`dependencies` 的语义**：列出上游任务号（`NEX-<n>`）。
+上游任务必须**已完成**（在 `backlog/completed/`）或**有已登记的任务链接**，
+否则触发 DoR 门禁第 7 项。
+
+**`references` 的语义**：指向架构文档章节、其他任务、RFC、issue。
+每个引用**必须可解析** —— 文件路径存在、章节号存在、任务号可定位。
+
+---
+
+## 3. Tier 1 · RFC 的最小结构
+
+跨特性 / 架构级 / 有争议的开放问题，先写 RFC，不写代码。
+
+```markdown
+---
+id: NEX-RFC-3
+title: "..."
+status: Draft | Ready for Review | Accepted | Superseded
+created: YYYY-MM-DD
+requires: [NEX-RFC-1, ...]
+---
+
+## 1. Summary        <一句话结论>
+## 2. Motivation     <为什么要做这个决策>
+## 3. Options        <候选方案，每个含取舍>
+## 4. Recommendation  <建议 + 反面论证>
+## 5. Consequences   <采纳/不采纳的后果>
+## 6. Open Questions <未决问题 —— 只能由操作者解决>
+```
+
+**OQ 禁令**：RFC 的 `## 6. Open Questions` 段落**不得**由代理自行消解。
+不得添加 `**Resolution:**` / `RESOLVED:` 标记（`ai-sdlc-decision-authority.mdc` §4.2）。
+
+**状态推进**：`Draft → Ready for Review → Accepted` 只由**操作者**推进。
+代理最多推进到 `Ready for Review`。
+
+---
+
+## 4. Tier 2 · Spec 的最小结构
+
+一个特性拆成多个任务时，先写 Spec。
+
+```
+docs/specs/<feature>/
+├── spec.md      <契约：范围、红线、核心契约、已定稿决策>
+├── tasks.md     <任务清单：T-NNN ↔ backlog 任务一一对应>
+└── contracts/   <机器可读的契约：invariants.json / error-codes.json>
+```
+
+> `plan.md` 是 AI-SDLC 标准四件套的一部分，但**本仓库不强制** ——
+> 实施顺序与依赖已经由 `tasks.md` 的 T-NNN 编号 + `backlog/` 的 `dependencies` 表达，
+> 再加一份 `plan.md` 是重复。
+> 由 `bash scripts/check-specs.sh` 强制的是**三件套**（`spec.md` + `tasks.md` + `contracts/`）。
+
+**`tasks.md` 与 `backlog/tasks/` 的关系**：两者**双向一一对应**。
+`tasks.md` 是索引与依赖图，`backlog/tasks/` 是每个任务的完整定义。
+禁止只在 `tasks.md` 里写任务而不落 `backlog/tasks/` —— 那是不可执行的计划；
+也禁止只落 `backlog/tasks/` 而不登记进 `tasks.md` —— 那是游离于契约之外的实现。
+
+**`contracts/` 的权威性**：契约产物（错误码表、事件负载、ID 类型）与
+架构文档 §6.3 的已定稿条款**冲突时以架构文档为准**；
+契约产物用于**细化**而非**覆盖**。
+
+**`contracts/` 必须是机器可读的** —— 让契约可以被门禁校验，而不是只停留在散文：
+
+| 文件 | 作用 |
+|---|---|
+| `invariants.json` | 每条不变量 + 它的验证方式（测试路径 / 测试名） |
+| `error-codes.json` | 本阶段允许触碰的业务码白名单 |
+
+**不变量引用的测试必须真的存在** ——
+声称「某测试验证了这条不变量」但那个测试根本不存在时，契约就是**空头支票**。
+由 `bash scripts/check-specs.sh` 规则 3 强制。
+
+---
+
+## 5. spec/status 分离
+
+AI-SDLC 的**基础结构模式**（`spec/spec.md` §4）：
+
+- `spec` = **期望状态**（人写，系统读）
+- `status` = **观测状态**（系统写，人读）
+
+本仓库的映射：
+
+| AI-SDLC | 本仓库 | 规则 |
+|---|---|---|
+| `spec` | 架构文档已定稿条款 + 任务文件 | **只读**，实现不得改写 |
+| `status` | 代码现状 + `backlog/` 任务状态 + CI 结果 | 实现更新它 |
+
+**推论**：
+
+- 实现与架构文档冲突时，**不得**以「代码已经是这样了」为由反向修改文档。
+  冲突 → 升级（`ai-sdlc-decision-authority.mdc` §4.2）。
+- 任务文件里的 `## Acceptance Criteria` 是**期望**，
+  勾选框是**观测** —— 只在**实际验证通过后**才勾选。
+
+---
+
+## 6. backlog 组织纪律
+
+由 `bash scripts/check-backlog.sh` 自动校验，CI 拦截：
+
+1. 同一任务**不得**同时存在于 `backlog/tasks/` 与 `backlog/completed/`。
+   归档用 `git mv`；编辑器可能在旧路径重建同名文件 —— 出现即 `git rm` 旧路径那一份。
+2. `backlog/completed/` 下的任务 frontmatter `status` 必须标记完成
+   （`Done` / `Completed` / `已归档`）。
+
+**归档时机**：任务**合入 `main` 之后**，在同一提交内把文件从 `tasks/` 移到 `completed/`，
+并更新所有引用了该路径的位置。
+
+---
+
+## 7. 提交信息与任务号
+
+Conventional Commits，标题末尾带任务号：
+
+```
+feat(core): 增加取消语义类型状态 (NEX-101)
+```
+
+**任务号来源**：必须是**实际存在的**任务文件编号。
+禁止编造任务号，禁止用未落盘的任务号。
+
+---
+
+## 8. 相关文件
+
+| 文件 | 作用 |
+|---|---|
+| `backlog/README.md` | 任务文件格式与生命周期 |
+| `docs/specs/README.md` | Spec 层（Tier 2）产物说明 |
+| `docs/rfcs/README.md` | RFC 层（Tier 1）产物说明 |
+| `ai-sdlc-dor-gate.mdc` | DoR 门禁（判定产出物是否够格开工） |
+| `ai-sdlc-workflow.mdc` | 生命周期阶段表与权威顺序 |

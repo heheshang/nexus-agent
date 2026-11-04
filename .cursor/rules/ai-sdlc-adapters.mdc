@@ -1,0 +1,144 @@
+---
+description: AI-SDLC 适配器与外部系统边界规范（接口契约、凭据管理、配置与密钥处理）
+alwaysApply: false
+---
+
+# AI-SDLC 适配器与外部系统边界规范
+
+管辖阶段 **S0–S8**（与外部系统交互的所有环节）。
+
+> 规范来源：`spec/adapters.md`、`spec/spec.md` §5.5。
+
+---
+
+## 1. 为什么有适配器层
+
+外部系统（GitHub、PostgreSQL、Redis、S3、Milvus、模型供应商）会变、会挂、会被限流。
+把它们直接写进业务逻辑，会让**可替换性**和**失败语义**都无从谈起。
+
+**适配器层的三条纪律**：
+
+1. 外部系统的**形状**不得渗入领域模型（DTO 里不许出现供应商的字段名）。
+2. 外部系统的**失败**必须被翻译成领域语义（`Retryable` / `UnknownOutcome` / `Terminal`）。
+3. 外部系统的**凭据**不得进入日志、错误消息或代码库。
+
+---
+
+## 2. 接口契约
+
+适配器实现以下契约之一。本仓库的对应关系：
+
+| 契约 | 方法（AI-SDLC 定义） | 本仓库实现位置 |
+|---|---|---|
+| **IssueTracker** | `listIssues` / `getIssue` / `createIssue` / `updateIssue` / `transitionIssue` / `watchIssues` | `backlog/` + GitHub（待接） |
+| **SourceControl** | `createBranch` / `createPR` / `mergePR` / `getFileContents` / `listChangedFiles` / `setCommitStatus` / `watchPREvents` | git CLI + `gh` CLI |
+| **CIPipeline** | `triggerBuild` | `.github/workflows/ci.yml` |
+| **CodeAnalysis** | `analyze` / `findReferences` / `getComplexity` | `cargo clippy` / `cargo test` |
+| **Messenger** | `send` / `sendRich` | PR 评论 |
+| **DeploymentTarget** | `deploy` / `rollback` / `getStatus` | 待接 |
+| **SecretStore** | `get` / `put` / `rotate` / `delete` | 环境变量 + `NX_` 映射 |
+| **AuditSink** | `record` / `query` | CI 日志 + 任务文件 |
+
+**实现契约时的强制要求**：
+
+- 契约方法**必须**先做输入校验再执行（路径、ID、范围）。
+- 契约方法**必须**返回领域语义错误，不得透传供应商的原始错误码。
+- 契约方法**必须**幂等，或显式声明不幂等。
+
+---
+
+## 3. 凭据管理（JIT 凭据）
+
+AI-SDLC 的 `CredentialPolicy` 规定：凭据按**阶段**授予，**最小 scope**，**用完即收**。
+
+| 字段 | 语义 | 本仓库 |
+|---|---|---|
+| `scope` | 所需权限的最小集合 | 只有确实要用的权限 |
+| `ttl` | 凭据存活时间（默认 `PT10M`） | 尽量短 |
+| `revokeOnComplete` | 阶段结束是否吊销（默认 `true`） | `true` |
+
+**硬性规则**：
+
+1. **凭据不得写入仓库**（含 `.env`、示例配置、测试夹具）。
+2. **凭据不得出现在日志 / 错误消息 / 提交信息**里。
+3. 凭据**只在确实需要时才获取**，用完立刻吊销。
+4. 需要凭据的动作 → **operator-only** 类别（`ai-sdlc-decision-authority.mdc` §2），
+   代理**不得自行获取或使用**账号凭据。
+
+---
+
+## 4. 配置与密钥处理
+
+### 4.1 分层配置
+
+```
+base（打包默认值） → file（configs/*.yaml） → env（NX_ 前缀 + __ 分隔层级路径）
+```
+
+- 环境变量覆盖由**声明式映射表**驱动，**禁止** `set_var` 逐个覆盖。
+- 映射表是**可读的表格**，不是散落在代码里的字符串拼接。
+
+### 4.2 密钥引用
+
+配置里**只写引用**，不写真值：
+
+```yaml
+# configs/*.yaml —— 引用
+llm:
+  api_key: ${env:NEX_LLM_API_KEY}
+```
+
+- **真值只从环境变量 / SecretStore 来**。
+- 密钥**不得**出现在日志、错误消息、快照测试的期望输出里。
+
+### 4.3 配置校验
+
+配置**必须在启动时校验**，而不是在第一次用到时才发现非法：
+
+- 必填项缺失 → 启动即失败，**错误消息指名缺哪一项**。
+- 取值超出枚举 → 启动即失败。
+- 配置文件格式非法 → 启动即失败，**错误消息含文件名与行号**。
+
+---
+
+## 5. 外部调用的失败翻译
+
+**供应商的错误码不得直接进入领域。** 翻译规则：
+
+| 供应商语义 | 领域语义 | 说明 |
+|---|---|---|
+| 明确拒绝（限流、参数错误） | `Retryable` | 退避后可重试 |
+| 上游不可用（连接失败、5xx） | `Retryable` | 退避后可重试 |
+| **超时** | **`UnknownOutcome`** | 请求可能已到达上游并产生副作用 |
+| 认证 / 授权失败 | `Terminal` | 重试无意义 |
+| 请求非法 | `Terminal` | 重试无意义 |
+
+**禁止**把超时与「明确拒绝」一视同仁（这是参考实现的已知缺陷，
+本项目在 `nexus-core` 的 `RetryPolicy` 里已修正）。
+
+**其他规则**：
+
+- 重试判据**只在 `nexus-core` 定义一次**，其他 crate **不得另写一套**。
+- 熔断 / 重试 / 限流是**基础设施语义**，属于被调用方的责任，不是调用方的。
+
+---
+
+## 6. 数据库与存储适配器
+
+| 规则 | 说明 |
+|---|---|
+| `sqlx` **只允许**出现在 `nexus-repo` / `nexus-infra` / `nexus-execution` | 其他 crate 出现即 `hard-mandatory` 违规 |
+| `nexus-model` 保持**纯 DTO** | 不得出现 `FromRow` / `sqlx::Type` / 任何 `sqlx::` 痕迹 |
+| 迁移**经由 sqlx 记账** | 不得手工 `psql` 应用迁移（会绕过 `_sqlx_migrations` 记账，导致重复应用） |
+| 迁移**必须可回滚** | 生产部署前确认回滚路径 |
+| 行类型 `#[derive(FromRow)]` 定义在 `nexus-repo` | 保持数据访问细节收敛在一处 |
+
+---
+
+## 7. 相关文件
+
+| 文件 | 作用 |
+|---|---|
+| `rust-code-standards.mdc` | `sqlx` 收敛、配置分层、SQL 校验的具体条款 |
+| `ai-sdlc-implementation.mdc` | 依赖方向铁律 |
+| `ai-sdlc-decision-authority.mdc` | 凭据类动作的 operator-only 判定 |
