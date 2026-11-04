@@ -244,6 +244,54 @@ fn nexus_model_has_no_database_traces() {
     );
 }
 
+/// §4.2 差异 1 —— `nexus-repo` **不得**引用 `workflow_runs`。
+///
+/// # 为什么这条铁律存在
+///
+/// `workflow_runs` 是**产品侧**的运行表，`nexus-execution` **独占**它。
+///
+/// 实证依据（架构文档 §4.3.2 的论证）：
+/// §2.5.4 的租约模型要求写入必须带 `generation` 做 fencing ——
+/// 这个逻辑属于**执行层**。
+///
+/// API 进程抢写 run 状态 = **绕过 fencing** = 僵尸 worker 能覆盖新 worker 的写入。
+/// `examples/demo-lease-fencing` 验证了 generation fencing 能拒绝僵尸写入 ——
+/// 但那个保证的前提是**只有执行层能写** `workflow_runs`。
+///
+/// 引擎侧用的是**另一张表** `execution_runs`（§3.9.4 的刻意偏离）。
+/// 本任务（NEX-12）落地的租约机制操作的就是 `execution_runs`。
+///
+/// # 这条测试防的是什么
+///
+/// 有人图省事，在 `nexus-repo` 里直接给 `workflow_runs` 写个行类型或一条 SQL。
+/// 那会让「只有执行层能写」的前提**失效**，而失效是**静默**的 ——
+/// 直到某天僵尸 worker 覆盖了新 worker 的写入才会暴露。
+#[test]
+fn nexus_repo_does_not_touch_workflow_runs() {
+    let src_dir = workspace_root()
+        .join("crates")
+        .join("nexus-repo")
+        .join("src");
+    if !src_dir.exists() {
+        return;
+    }
+
+    let mut violations = Vec::new();
+    for file in walk_rs(&src_dir) {
+        let content = std::fs::read_to_string(&file).expect("读取源文件失败");
+        let code = strip_comments(&content);
+        if code.contains("workflow_runs") {
+            violations.push(format!("{} 引用了 workflow_runs", file.display()));
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "workflow_runs 由 nexus-execution 独占 —— nexus-repo 不得引用：\n{}",
+        violations.join("\n")
+    );
+}
+
 /// 剥掉 Rust 源码里的**注释**，只留下真正的代码。
 ///
 /// # 为什么需要

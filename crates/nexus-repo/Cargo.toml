@@ -27,6 +27,11 @@ tracing.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 anyhow.workspace = true
+
+[dev-dependencies]
+# 负向测试框架：断言「写错的代码编译不过」（架构文档 §5.2）
+trybuild.workspace = true
+
 [lints]
 workspace = true
 

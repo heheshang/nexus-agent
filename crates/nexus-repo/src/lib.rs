@@ -21,6 +21,8 @@
 //! | [`error`] | `sqlx::Error` → [`AppError`] 的**唯一**转换点 |
 //! | [`users`] | 用户仓储 |
 //! | [`sessions`] | 会话仓储 |
+//! | [`lease`] | 租约与 fencing 的**类型**（`Fence` / `RunLease`） |
+//! | [`leases`] | 执行租约的仓储（领取 + 围栏写入） |
 //!
 //! # 依赖方向
 //!
@@ -41,11 +43,17 @@
 
 pub mod convert;
 pub mod error;
+pub mod lease;
+pub mod leases;
 pub mod rows;
 pub mod sessions;
 pub mod users;
 
 pub use error::map_sqlx_error;
+pub use lease::{Fence, LeaseLost, LeaseOutcome, RunLease};
+pub use leases::{
+    CounterColumn, DEFAULT_LEASE_TTL_SECS, ExecutionLeaseRepository, LeaseInfo, LeaseSettings,
+};
 pub use rows::{
     AgentRow, ExecutionApprovalRow, ExecutionAttemptRow, ExecutionCheckpointRow, ExecutionEventRow,
     ExecutionOperationRow, ExecutionOutboxRow, ExecutionRunRow, McpServerRow, MessageRow,
