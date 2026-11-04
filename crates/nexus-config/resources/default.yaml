@@ -1,0 +1,53 @@
+# nexus-config 打包的默认配置（base 层）。
+#
+# 这是**最低优先级**的来源：被 `configs/*.yaml`（file 层）覆盖，
+# 再被 `NX_*` 环境变量（env 层）覆盖。
+#
+# 只放「合理默认值」—— 不放任何与部署环境相关的具体值
+# （连接串、密钥、主机名一律走 file 层或 env 层）。
+
+log:
+  # trace | debug | info | warn | error
+  level: info
+  # text | json
+  format: text
+
+server:
+  host: 0.0.0.0
+  port: 8080
+  # SSE 心跳间隔（秒）
+  heartbeat_secs: 15
+  # 单次请求体上限（字节）
+  max_body_bytes: 10485760
+
+database:
+  # 最大连接数。0 表示由驱动自行决定。
+  max_connections: 10
+  # 连接获取超时（秒）
+  connect_timeout_secs: 5
+
+worker:
+  # 单次租约持有时长（秒）。到期未续租则被 fencing 拒绝。
+  lease_ttl_secs: 30
+  # 轮询间隔（毫秒）
+  poll_interval_ms: 500
+
+llm:
+  # 默认供应商标识
+  default_provider: deepseek
+  # 请求超时（秒）。超时映射为 UnknownOutcome，不自动重试。
+  request_timeout_secs: 120
+  # 上下文预算（token）
+  context_budget: 32000
+
+sandbox:
+  # 危险工具执行超时（秒）
+  timeout_secs: 60
+  # 输出大小上限（字节）
+  max_output_bytes: 1048576
+
+observability:
+  # 是否导出 OpenTelemetry
+  otlp_enabled: false
+  # OTLP 端点
+  otlp_endpoint: ""

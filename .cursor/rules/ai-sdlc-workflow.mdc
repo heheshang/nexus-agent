@@ -82,9 +82,10 @@ backlog/tasks/<NEX-<n>> - <slug>.md
 
 1. `bash scripts/check-lock.sh` —— 依赖锁定纪律（成员 crate 不得硬编码版本号；`Cargo.lock` 入库）。
 2. `bash scripts/check-deps.sh` —— crate 依赖方向铁律。
-3. `cargo fmt --all --check` —— 格式化。
-4. `cargo clippy --workspace --all-targets --locked -- -D warnings` —— 静态检查零告警。
-5. `cargo test --workspace --locked` —— 全量测试通过。
+3. `bash scripts/check-naming.sh` —— 标识符不得含中文（Rust 代码规范 §11）。
+4. `cargo fmt --all --check` —— 格式化。
+5. `cargo clippy --workspace --all-targets --locked -- -D warnings` —— 静态检查零告警。
+6. `cargo test --workspace --locked` —— 全量测试通过。
 
 ---
 
@@ -148,7 +149,7 @@ backlog/tasks/<NEX-<n>> - <slug>.md
 
 - **始终 rebase** 到 `main`，**绝不把 `main` merge 进来**，保持线性历史。
 - 提交信息用 Conventional Commits，标题末尾带任务号，并带 `Co-Authored-By` 尾注。
-- 提交前本地跑通全部五道门禁；`ci.yml` 的结果就是准入结果。
+- 提交前本地跑通全部六道门禁；`ci.yml` 的结果就是准入结果。
 - 每个交付物必须能被**可执行断言**覆盖 —— 见架构文档 §5（类型层负向测试 / 结构层架构测试 / 行为层不变量测试）。
 - 契约类改动（错误码、事件类型、ID 类型）必须同步更新契约测试与文档表格，并标注**破坏性变更**还是兼容变更。
 

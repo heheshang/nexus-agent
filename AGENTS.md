@@ -36,12 +36,13 @@
 ```bash
 bash scripts/check-lock.sh        # 依赖锁定纪律
 bash scripts/check-deps.sh        # crate 依赖方向铁律
+bash scripts/check-naming.sh      # 标识符不得含中文
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 ```
 
-本地开发可用 `bash scripts/dev.sh <check|fmt|lint|test|audit>`。这五道就是 CI 的准入门禁（`hard-mandatory`）。
+本地开发可用 `bash scripts/dev.sh <check|fmt|lint|test|audit>`。这六道就是 CI 的准入门禁（`hard-mandatory`）。
 
 `examples/` 是独立 workspace，验证命令为 `cd examples && cargo test --workspace`。
 

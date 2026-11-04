@@ -117,7 +117,7 @@ alwaysApply: false
 | 结构层 | 架构测试 / 依赖方向校验 | 依赖方向、无环、`sqlx` 收敛 |
 | 行为层 | 集成 / 不变量测试 | 语义不变量（如 fencing 拒绝僵尸写入） |
 
-- 交付前跑通：`scripts/check-lock.sh`、`scripts/check-deps.sh`、`cargo fmt --all --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings`、`cargo test --workspace --locked`。
+- 交付前跑通：`scripts/check-lock.sh`、`scripts/check-deps.sh`、`scripts/check-naming.sh`、`cargo fmt --all --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings`、`cargo test --workspace --locked`。
 - `examples/` 是**独立 workspace**（有自己的 lockfile），不参与主 workspace 的 clippy 与架构测试扫描；demo 的形状搬进正式 crate 时，demo 保留作为回归基准。
 
 ---
@@ -128,3 +128,22 @@ alwaysApply: false
 - 注释用中文解释「为什么」，不解释「做了什么」。
 - 不做过早抽象：相似三行好过错误的一个抽象。
 - 公开类型应有 `Debug`（workspace lint `missing_debug_implementations`）；未完成实现必须显式 `todo!` 标记（workspace lint `todo`）。
+
+---
+
+## 11. 标识符命名
+
+**标识符必须用 ASCII。中文只允许出现在注释、字符串字面量与文档注释里。**
+
+- Rust：`snake_case`（函数、方法、模块）、`CamelCase`（类型、trait）、`SCREAMING_SNAKE_CASE`（常量）。
+- TS/JS：`camelCase`（函数、变量）、`PascalCase`（类型、组件）、`SCREAMING_SNAKE_CASE`（常量）。
+
+理由：
+
+- Rust 允许非 ASCII 标识符（RFC 2457），但中文函数名在 rust-analyzer、终端 diff、`grep`、CI 日志里都难以检索与引用。
+- TS/JS 的中文标识符会直接破坏 `npm` 生态的大量工具链。
+- 中英混排的命名会让「注释解释为什么」的规则失去意义 —— **名字应是最稳定的契约**。
+
+**测试函数名同样适用**：测试名用英文描述**断言的行为**（如 `rejects_write_operations`），中文说明放在测试体上方的注释里。
+
+由 `bash scripts/check-naming.sh` 自动校验，CI 拦截。

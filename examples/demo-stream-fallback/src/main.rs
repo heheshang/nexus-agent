@@ -209,7 +209,7 @@ mod tests {
     use futures::StreamExt;
 
     #[tokio::test]
-    async fn 流开始前允许回退() {
+    async fn fallback_allowed_before_stream_starts() {
         let mut s = StreamSession::new();
         assert!(s.fallback(ProviderId::Fallback).is_ok());
         assert_eq!(s.provider(), Some(ProviderId::Fallback));
@@ -218,7 +218,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn 流开始后拒绝回退() {
+    async fn fallback_rejected_after_stream_starts() {
         let mut s = StreamSession::new();
         s.select_provider(ProviderId::Primary);
         s.mark_started();
@@ -231,7 +231,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn 锁定发生在下游_poll_的时刻() {
+    async fn lock_happens_at_downstream_poll() {
         let mut stream = SessionStream::new(ProviderId::Primary, vec![Chunk("a".into())]);
         // 还没消费 —— 未开始
         assert!(!stream.session().started());
@@ -242,14 +242,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn 空流不锁定() {
+    async fn empty_stream_does_not_lock() {
         let mut stream = SessionStream::new(ProviderId::Primary, vec![]);
         assert!(stream.next().await.is_none());
         assert!(!stream.session().started());
     }
 
     #[tokio::test]
-    async fn 流开始后_select_provider_无效() {
+    async fn select_provider_after_stream_start_is_invalid() {
         let mut s = StreamSession::new();
         s.select_provider(ProviderId::Primary);
         s.mark_started();
@@ -258,7 +258,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn 已选定的供应商不会被覆盖() {
+    async fn selected_provider_is_not_overwritten() {
         let mut s = StreamSession::new();
         s.fallback(ProviderId::Fallback).unwrap();
         // 流开始时的 Primary 不应覆盖已选的 Fallback

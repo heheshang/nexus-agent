@@ -119,7 +119,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn 可丢通道满时丢弃且不阻塞() {
+    async fn lossy_channel_drops_when_full_without_blocking() {
         let (tx, mut rx) = mpsc::channel::<u32>(2);
         let s = LossySender { tx };
 
@@ -136,7 +136,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn 必达通道挂起等待而非丢弃() {
+    async fn reliable_channel_waits_instead_of_dropping() {
         let (tx, mut rx) = mpsc::channel::<u32>(1);
         let s = GuaranteedSender { tx };
 

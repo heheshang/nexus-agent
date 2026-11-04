@@ -179,7 +179,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn 编码格式符合_sse_规范() {
+    fn encoding_matches_sse_spec() {
         let out = encode("delta", &serde_json::json!({"content": "hi"}));
         assert_eq!(
             String::from_utf8(out).unwrap(),
@@ -188,7 +188,7 @@ mod tests {
     }
 
     #[test]
-    fn 逐字节喂入不丢帧() {
+    fn byte_by_byte_feed_does_not_drop_frames() {
         let multi = [
             encode("delta", &serde_json::json!({"c": 1})),
             encode("done", &serde_json::json!({"c": 2})),
@@ -205,7 +205,7 @@ mod tests {
     }
 
     #[test]
-    fn 分隔符必须被切走_否则死循环() {
+    fn separator_must_be_stripped_to_avoid_infinite_loop() {
         // 回归测试：曾经的 bug 是 `split_to(pos)` 没切走 "\n\n"，
         // 导致分隔符留在缓冲区头部，下一轮 position() 返回 0 → 无限循环。
         //
@@ -224,7 +224,7 @@ mod tests {
     }
 
     #[test]
-    fn 连续多帧不会残留分隔符() {
+    fn consecutive_frames_leave_no_separator() {
         let mut d = FrameDecoder::new();
         let mut buf = Vec::new();
         for i in 0..5 {
@@ -236,7 +236,7 @@ mod tests {
     }
 
     #[test]
-    fn 任意切分点都能正确重组() {
+    fn arbitrary_split_points_reassemble_correctly() {
         let single = encode("delta", &serde_json::json!({"content": "hello world"}));
         for split in 1..single.len() {
             let mut d = FrameDecoder::new();
@@ -249,7 +249,7 @@ mod tests {
     }
 
     #[test]
-    fn 半帧被缓冲而非吐出() {
+    fn partial_frame_is_buffered_not_emitted() {
         let single = encode("delta", &serde_json::json!({"x": 1}));
         let mut d = FrameDecoder::new();
         assert!(d.push(&single[..single.len() - 3]).is_empty());
@@ -257,27 +257,27 @@ mod tests {
     }
 
     #[test]
-    fn 多行_data_按规范拼接() {
+    fn multiline_data_is_joined_per_spec() {
         let raw = b"event: delta\ndata: line1\ndata: line2";
         let f = parse_frame(raw).unwrap();
         assert_eq!(f.data, "line1\nline2");
     }
 
     #[test]
-    fn 注释行被忽略() {
+    fn comment_lines_are_ignored() {
         let raw = b": ping\nevent: delta\ndata: {}";
         let f = parse_frame(raw).unwrap();
         assert_eq!(f.event, "delta");
     }
 
     #[test]
-    fn 空帧是错误() {
+    fn empty_frame_is_error() {
         assert!(parse_frame(b"").is_err());
         assert!(parse_frame(b"foo: bar").is_err());
     }
 
     #[test]
-    fn 心跳是注释行() {
+    fn heartbeat_is_comment_line() {
         assert_eq!(ping(), b": ping\n\n");
     }
 }

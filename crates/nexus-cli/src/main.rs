@@ -17,6 +17,7 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
+use nexus_config::mapping;
 
 /// 队列选择。Go 版用 `-queues execution,doc-etl,memory`。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -68,6 +69,77 @@ enum Command {
     },
     /// Agent 评估
     Agenteval,
+    /// 配置工具（打印映射表 / 生效配置 / 来源追踪）
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ConfigAction {
+    /// 打印声明式环境变量映射表（可枚举的事实）
+    Env,
+    /// 打印当前生效的配置（base + file + env 合并后）
+    Show,
+    /// 查询某个配置路径的来源层
+    Origin {
+        /// 配置路径，如 `log.level`
+        path: String,
+    },
+}
+
+/// 打印声明式环境变量映射表。
+///
+/// 架构文档 §2.7 —— 「哪些环境变量能覆盖什么」必须**可枚举**。
+/// 这条命令把映射表变成运行时的**可观测输出**，而不只是源码里的一个清单。
+fn print_env_mapping() {
+    let table = mapping::table();
+
+    println!("# 环境变量映射表（{} 条）", table.len());
+    println!("# 格式：环境变量 → 配置路径（类型）");
+    println!();
+
+    for mapping in table.mappings() {
+        let secret = if mapping.secret { " [敏感]" } else { "" };
+        println!(
+            "{:<44} → {}{} ({})",
+            mapping.env_var(),
+            mapping.config_path,
+            secret,
+            mapping.value_type.expected_name()
+        );
+    }
+}
+
+/// 加载配置栈：base（打包默认）→ file（configs/*.yaml）→ env（`NX_*`）。
+fn load_stack(config_dir: &Option<String>) -> Result<nexus_config::ConfigStack> {
+    let mut stack = nexus_config::ConfigStack::new();
+
+    stack.set_base(nexus_config::parse_base_config());
+
+    let dir = config_dir
+        .as_deref()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(nexus_config::loader::DEFAULT_CONFIG_DIR));
+
+    if dir.exists() {
+        let file_layer = nexus_config::load_config_dir(&dir)?;
+        stack.set_file(file_layer);
+    }
+
+    let report = nexus_config::apply_env(&mut stack, &mapping::table(), &nexus_config::ProcessEnv)?;
+
+    // 未被映射表覆盖的 NX_* 变量 = 运维以为配了但其实没生效。
+    if !report.unmapped.is_empty() {
+        eprintln!(
+            "警告：{} 个环境变量未被映射表覆盖（不生效）：{}",
+            report.unmapped.len(),
+            report.unmapped.join(", ")
+        );
+    }
+
+    Ok(stack)
 }
 
 #[tokio::main]
@@ -75,7 +147,6 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     // TODO(Phase 0): 初始化 tracing（日志格式由 config.log.format 决定）
-    // TODO(Phase 0): 加载配置（config_dir + NX_ 前缀环境变量覆盖）
     tracing::info!("nexus starting: command = {:?}", cli.command);
 
     match cli.command {
@@ -102,5 +173,26 @@ async fn main() -> Result<()> {
         Command::Agenteval => {
             anyhow::bail!("`nexus agenteval` 尚未实现（Phase 10）")
         }
+        Command::Config { action } => match action {
+            ConfigAction::Env => print_env_mapping(),
+            ConfigAction::Show => {
+                let stack = load_stack(&cli.config_dir)?;
+                println!("{}", serde_json::to_string_pretty(stack.merged())?);
+            }
+            ConfigAction::Origin { path } => {
+                let stack = load_stack(&cli.config_dir)?;
+                match stack.origin(&path) {
+                    Some(layer) => {
+                        println!("{path} ← {layer}");
+                        if let Some(value) = stack.get(&path) {
+                            println!("  值：{value}");
+                        }
+                    }
+                    None => println!("{path} ← 未配置"),
+                }
+            }
+        },
     }
+
+    Ok(())
 }

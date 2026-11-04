@@ -25,11 +25,11 @@ references:
 
 ## Acceptance Criteria
 
-- [ ] #1 `ConfigStack` 类型按 `base` → `file` → `env` 三层实现，优先级从低到高，且**层级来源在类型上可区分**（不是三个同类型 `Config` 的隐式合并）
-- [ ] #2 存在**声明式映射表**（不是 `set_var` 逐个覆盖），能把 `NX_A__B` 形式的环境变量映射到配置路径
-- [ ] #3 存在一份**可枚举**的映射清单（表本身或生成的文档），能回答「哪些环境变量能覆盖什么」
-- [ ] #4 仓库存在 `configs/` 目录，含示例配置文件；`configs/local.yaml` 与 `configs/secrets.yaml` 已在 `.gitignore` 中且确实未被入库
-- [ ] #5 环境变量覆盖有单元测试：至少覆盖「未设置时不覆盖」「设置后覆盖生效」「未知环境变量被忽略或报错」三种情形
-- [ ] #6 `cargo test --workspace --locked` 通过
-- [ ] #7 `cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo fmt --all --check` 通过
-- [ ] #8 CI 五道门禁全绿
+- [x] #1 `ConfigStack` 类型按 `base` → `file` → `env` 三层实现，优先级从低到高，且**层级来源在类型上可区分**（`ConfigLayer` 枚举 + `origin()` 查询来源）
+- [x] #2 存在**声明式映射表**（不是 `set_var` 逐个覆盖），能把 `NX_A__B` 形式的环境变量映射到配置路径 —— `nexus-config/src/mapping.rs`
+- [x] #3 存在一份**可枚举**的映射清单：`mapping::table().declared_env_vars()` + `docs/operations/configuration.md` 完整表格 + `nexus config env` 命令
+- [x] #4 仓库存在 `configs/` 目录，含示例配置文件；`configs/local.yaml` 与 `configs/secrets.yaml` 已在 `.gitignore` 中且确实未被入库
+- [x] #5 环境变量覆盖有单元测试：覆盖「未设置时不覆盖」「设置后覆盖生效」「未知环境变量被忽略但被报告」「类型错误报错」四种情形
+- [x] #6 `cargo test --workspace --locked` 通过
+- [x] #7 `cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo fmt --all --check` 通过
+- [x] #8 CI 六道门禁全绿（含 `scripts/check-naming.sh`）

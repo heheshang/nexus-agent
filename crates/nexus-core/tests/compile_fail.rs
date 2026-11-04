@@ -29,7 +29,7 @@
 /// 存在的意义是：若哪天 `trybuild` 因依赖或配置问题静默跳过全部用例，
 /// 本用例会先失败，把问题暴露出来。
 #[test]
-fn 负向测试框架自检() {
+fn compile_fail_framework_self_check() {
     let t = trybuild::TestCases::new();
     t.compile_fail("tests/compile_fail/framework_selfcheck.rs");
 }

@@ -35,6 +35,10 @@ jobs:
       - name: 校验 crate 依赖方向
         run: bash scripts/check-deps.sh
 
+      # 标识符不得含中文（.cursor/rules/rust-code-standards.mdc §11）
+      - name: 校验标识符命名
+        run: bash scripts/check-naming.sh
+
       - name: cargo fmt --check
         run: cargo fmt --all --check
 

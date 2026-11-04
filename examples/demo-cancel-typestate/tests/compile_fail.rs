@@ -6,13 +6,13 @@
 //! 意外长出了 `cancel()` 方法，这个测试会立刻失败。
 
 #[test]
-fn 不可取消作用域上不能调用_cancel() {
+fn cannot_call_cancel_on_non_cancellable_scope() {
     let t = trybuild::TestCases::new();
     t.compile_fail("tests/compile_fail/detached_cannot_cancel.rs");
 }
 
 #[test]
-fn 不可取消作用域不能当作可取消作用域使用() {
+fn non_cancellable_scope_is_not_cancellable_scope() {
     let t = trybuild::TestCases::new();
     t.compile_fail("tests/compile_fail/detached_not_request_scope.rs");
 }

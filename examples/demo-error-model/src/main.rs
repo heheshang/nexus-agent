@@ -430,7 +430,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn 业务码序列化为数字而非变体名() {
+    fn error_code_serializes_as_number_not_variant_name() {
         assert_eq!(
             serde_json::to_string(&ErrorCode::InvalidParam).unwrap(),
             "10001"
@@ -442,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn 码段划分正确() {
+    fn code_ranges_are_correct() {
         assert_eq!(ErrorCode::InvalidParam.segment(), 1);
         assert_eq!(ErrorCode::Unauthorized.segment(), 2);
         assert_eq!(ErrorCode::ModelTimeout.segment(), 5);
@@ -451,7 +451,7 @@ mod tests {
     }
 
     #[test]
-    fn 业务码互不重复() {
+    fn error_codes_are_unique() {
         let mut codes: Vec<i32> = ALL_CODES.iter().map(|c| c.code()).collect();
         codes.sort_unstable();
         let before = codes.len();
@@ -464,7 +464,7 @@ mod tests {
     ///
     /// 这份清单是**前后端契约**。改一个码值，已上线的前端分支逻辑就失效。
     #[test]
-    fn 业务码表与契约一致() {
+    fn error_code_table_matches_contract() {
         // (变体, 码值, HTTP 状态)
         const CONTRACT: &[(&str, i32, u16)] = &[
             ("InvalidParam", 10001, 400),
@@ -524,7 +524,7 @@ mod tests {
     }
 
     #[test]
-    fn 每个码段都能正确划分() {
+    fn each_code_range_is_partitioned_correctly() {
         for c in ALL_CODES {
             let seg = c.segment();
             assert!((1..=9).contains(&seg), "{c:?} 码段越界：{seg}");
@@ -534,7 +534,7 @@ mod tests {
     }
 
     #[test]
-    fn 超时类错误都归为_结果未知() {
+    fn timeout_errors_map_to_unknown_outcome() {
         // 这组是本设计相对参考实现的关键改进：
         // 超时 → 请求可能已到达上游 → 自动重试会重复扣费
         for c in [
@@ -555,7 +555,7 @@ mod tests {
     }
 
     #[test]
-    fn 明确失败类错误归为_可重试() {
+    fn definite_failure_errors_map_to_retryable() {
         for c in [
             ErrorCode::RateLimited,
             ErrorCode::ModelUnavailable,
@@ -573,7 +573,7 @@ mod tests {
     }
 
     #[test]
-    fn 内部原因绝不出现在_user_facing_里() {
+    fn internal_cause_never_appears_in_user_facing() {
         let err = AppError::new(ErrorCode::Internal, "系统内部错误")
             .with_cause(std::io::Error::other("secret=abc123"));
         let json = serde_json::to_string(&err.facing).unwrap();
@@ -582,7 +582,7 @@ mod tests {
     }
 
     #[test]
-    fn 超时属于结果未知而非可直接重试() {
+    fn timeout_is_unknown_outcome_not_retryable() {
         let timeout = AppError::from(ModelError::Timeout);
         assert_eq!(timeout.retry_policy(), RetryPolicy::UnknownOutcome);
 
@@ -598,7 +598,7 @@ mod tests {
     }
 
     #[test]
-    fn 领域错误可穷尽匹配() {
+    fn domain_error_is_exhaustively_matchable() {
         // 这个 match 若新增变体不处理，编译器会报错 —— 这就是价值。
         fn classify(e: &ModelError) -> &'static str {
             match e {

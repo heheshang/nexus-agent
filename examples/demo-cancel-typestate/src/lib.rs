@@ -96,7 +96,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn 可取消作用域的取消信号被触发() {
+    async fn cancel_signal_of_cancellable_scope_fires() {
         let hit = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let h = Arc::clone(&hit);
         let scope = RequestScope::new(move || h.store(true, std::sync::atomic::Ordering::SeqCst));
@@ -105,7 +105,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn 脱离后取消回调不再触发() {
+    async fn cancel_callback_does_not_fire_after_detach() {
         let hit = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let h = Arc::clone(&hit);
         let _detached =

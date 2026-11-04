@@ -190,14 +190,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn 对象键序不影响规范化结果() {
+    fn object_key_order_does_not_affect_canonical_result() {
         let a = obj(&[("x", Value::from(1)), ("y", Value::from(2))]);
         let b = obj(&[("y", Value::from(2)), ("x", Value::from(1))]);
         assert_eq!(canonicalize(&a).unwrap(), canonicalize(&b).unwrap());
     }
 
     #[test]
-    fn 嵌套对象的键序也不影响() {
+    fn nested_object_key_order_also_does_not_affect() {
         let a = obj(&[(
             "outer",
             obj(&[("p", Value::from(1)), ("q", Value::from(2))]),
@@ -210,7 +210,7 @@ mod tests {
     }
 
     #[test]
-    fn 数组顺序影响规范化结果() {
+    fn array_order_affects_canonical_result() {
         let a = obj(&[("xs", Value::Array(vec![Value::from(1), Value::from(2)]))]);
         let b = obj(&[("xs", Value::Array(vec![Value::from(2), Value::from(1)]))]);
         assert_ne!(canonicalize(&a).unwrap(), canonicalize(&b).unwrap());
@@ -224,28 +224,28 @@ mod tests {
     }
 
     #[test]
-    fn 哈希对语义等价的输入一致() {
+    fn hash_is_stable_for_semantically_equal_input() {
         let a = obj(&[("x", Value::from(1)), ("y", Value::from(2))]);
         let b = obj(&[("y", Value::from(2)), ("x", Value::from(1))]);
         assert_eq!(canonical_hash(&a).unwrap(), canonical_hash(&b).unwrap());
     }
 
     #[test]
-    fn 语义变化导致哈希变化() {
+    fn semantic_change_changes_hash() {
         let a = obj(&[("x", Value::from(1))]);
         let b = obj(&[("x", Value::from(2))]);
         assert_ne!(canonical_hash(&a).unwrap(), canonical_hash(&b).unwrap());
     }
 
     #[test]
-    fn 字符串转义正确() {
+    fn string_escaping_is_correct() {
         let v = Value::from("a\"b\\c\nd");
         let s = String::from_utf8(canonicalize(&v).unwrap()).unwrap();
         assert_eq!(s, r#""a\"b\\c\nd""#);
     }
 
     #[test]
-    fn 嵌套结构里的_null_也被丢弃() {
+    fn nested_null_is_also_dropped() {
         let a = obj(&[("outer", obj(&[("p", Value::from(1)), ("q", Value::Null)]))]);
         let b = obj(&[("outer", obj(&[("p", Value::from(1))]))]);
         assert_eq!(canonicalize(&a).unwrap(), canonicalize(&b).unwrap());

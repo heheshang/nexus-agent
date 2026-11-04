@@ -194,7 +194,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn 放行只读查询() {
+    fn allows_read_only_query() {
         for sql in [
             "SELECT 1",
             "SELECT id FROM users WHERE id = 1",
@@ -207,7 +207,7 @@ mod tests {
     }
 
     #[test]
-    fn 拒绝写操作() {
+    fn rejects_write_operation() {
         for sql in [
             "DROP TABLE users",
             "DELETE FROM users",
@@ -222,13 +222,13 @@ mod tests {
     }
 
     #[test]
-    fn 拒绝多语句() {
+    fn rejects_multiple_statements() {
         assert!(!allows("SELECT 1; DROP TABLE users"));
         assert!(!allows("SELECT 1; SELECT 2"));
     }
 
     #[test]
-    fn 拒绝_cte_里的写操作() {
+    fn rejects_write_inside_cte() {
         // 这是关键词匹配最容易漏掉的一类
         assert!(!allows(
             "WITH x AS (DELETE FROM users RETURNING *) SELECT * FROM x"
@@ -236,12 +236,12 @@ mod tests {
     }
 
     #[test]
-    fn 拒绝_select_into() {
+    fn rejects_select_into() {
         assert!(!allows("SELECT * FROM t INTO OUTFILE '/tmp/x'"));
     }
 
     #[test]
-    fn 拒绝畸形_sql() {
+    fn rejects_malformed_sql() {
         // 语法上就解析不过的
         assert!(!allows("SELECT FROM"));
         assert!(!allows("SELECT 'unterminated"));
@@ -266,7 +266,7 @@ mod tests {
     }
 
     #[test]
-    fn 拒绝_merge() {
+    fn rejects_merge() {
         assert!(!allows(
             "MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN UPDATE SET t.x = s.x"
         ));

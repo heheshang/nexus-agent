@@ -237,7 +237,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn 数据层实现能力层的_trait() {
+    async fn data_layer_implements_capability_trait() {
         let repo: Arc<dyn ChunkStore> = Arc::new(PgChunkRepo::new());
         let engine = RagEngine::new(repo);
         engine
@@ -252,7 +252,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn 写入是幂等的() {
+    async fn write_is_idempotent() {
         let repo = PgChunkRepo::new();
         repo.upsert(&[Chunk {
             id: 1,
@@ -274,7 +274,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn 可以替换实现而不用改引擎() {
+    async fn implementation_swappable_without_touching_engine() {
         let e1 = RagEngine::new(Arc::new(PgChunkRepo::new()));
         let e2 = RagEngine::new(Arc::new(MemChunkRepo::new()));
         let c = vec![Chunk {

@@ -1,0 +1,35 @@
+# 本地覆盖配置示例。
+#
+# ⚠️  本文件**不入库**（`.gitignore` 已排除 `configs/local.yaml`）。
+#     把它当作模板复制到 `configs/local.yaml` 后按需修改。
+#
+# 用法：
+#     cp configs/local.yaml.example configs/local.yaml
+#
+# 加载顺序：`config.yaml` → `local.yaml` → `secrets.yaml`（后者覆盖前者）。
+# `secrets.yaml` 同样不入库。
+
+log:
+  level: debug
+
+server:
+  port: 9090
+
+# database:
+#   url: postgres://nexus:nexus@localhost:5432/nexus
+#   max_connections: 20
+#
+# redis:
+#   url: redis://localhost:6379
+#
+# milvus:
+#   url: http://localhost:19530
+#
+# s3:
+#   endpoint: http://localhost:9000
+#   bucket: nexus-docs
+#
+# llm:
+#   deepseek:
+#     base_url: http://localhost:11434/v1
+#     model: deepseek-chat

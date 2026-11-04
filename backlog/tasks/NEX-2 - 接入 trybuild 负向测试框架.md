@@ -29,4 +29,4 @@ references:
 - [ ] #4 `cargo test --workspace --locked` 通过，且 `Cargo.lock` 已同步入库
 - [ ] #5 `bash scripts/check-lock.sh` 通过（成员 crate 未硬编码版本号）
 - [ ] #6 `cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警
-- [ ] #7 CI 五道门禁全绿
+- [ ] #7 CI 六道门禁全绿（含 `scripts/check-naming.sh`）

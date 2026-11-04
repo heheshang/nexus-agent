@@ -134,7 +134,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn 服务端_tool_router_可构造() {
+    fn server_tool_router_is_constructible() {
         let router: ToolRouter<EchoServer> = EchoServer::tool_router();
         // router 非空说明宏展开成功
         let s = format!("{router:?}");
@@ -142,7 +142,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn 客户端_记录端点() {
+    async fn client_records_endpoint() {
         let c = McpClient::new("http://127.0.0.1:9/mcp");
         assert_eq!(c.endpoint(), "http://127.0.0.1:9/mcp");
     }

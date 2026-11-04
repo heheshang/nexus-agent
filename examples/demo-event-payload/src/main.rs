@@ -233,7 +233,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn 序列化是扁平的_type_与字段同级() {
+    fn serialization_is_flat_with_type_at_sibling_level() {
         let v = serde_json::to_value(EventPayload::Delta {
             content: "hi".into(),
         })
@@ -245,7 +245,7 @@ mod tests {
     }
 
     #[test]
-    fn 状态枚举序列化为小写标签() {
+    fn state_enum_serializes_to_lowercase_tag() {
         // 无数据变体 → 字符串 "ok"
         assert_eq!(
             serde_json::to_value(ToolStatus::Ok).unwrap(),
@@ -259,7 +259,7 @@ mod tests {
     }
 
     #[test]
-    fn 扩展逃生舱可以携带任意字段() {
+    fn extension_escape_hatch_carries_arbitrary_fields() {
         let v = serde_json::to_value(EventPayload::Extension {
             name: "custom".into(),
             data: serde_json::json!({"foo": "bar"}),
@@ -271,7 +271,7 @@ mod tests {
     }
 
     #[test]
-    fn 序号从_1_开始且严格递增() {
+    fn sequence_starts_at_1_and_strictly_increases() {
         let mut sink = EventSink::new("r");
         assert_eq!(
             sink.emit(EventPayload::Meta {
@@ -292,7 +292,7 @@ mod tests {
     }
 
     #[test]
-    fn 所有事件类型都能往返序列化() {
+    fn all_event_types_roundtrip_serialization() {
         let samples = [
             EventPayload::Meta {
                 session_id: "s".into(),
@@ -361,7 +361,7 @@ mod tests {
     /// 事件名是 SSE `event:` 字段的值，前端按它分支 —— 少一个或改一个就是破坏性变更。
     /// 这份清单是**契约**，不是实现细节。
     #[test]
-    fn 事件名清单与契约一致() {
+    fn event_name_list_matches_contract() {
         const CONTRACT: &[&str] = &[
             "meta",
             "delta",

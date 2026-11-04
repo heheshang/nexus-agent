@@ -1,0 +1,29 @@
+# NexusAgent 主配置（file 层）。
+#
+# 优先级：base（打包默认） < file（本文件 + local.yaml） < env（NX_* 环境变量）。
+#
+# 本文件入库，记录**各部署环境共有的结构性配置**。
+# 环境相关的具体值（连接串、主机名）走 `local.yaml`（不入库）或 `NX_*` 环境变量。
+#
+# 可被环境变量覆盖的路径见 `crates/nexus-config/src/mapping.rs` 的映射表。
+
+log:
+  level: info
+  format: text
+
+server:
+  host: 0.0.0.0
+  port: 8080
+
+worker:
+  lease_ttl_secs: 30
+
+llm:
+  default_provider: deepseek
+  request_timeout_secs: 120
+
+sandbox:
+  timeout_secs: 60
+
+observability:
+  otlp_enabled: false

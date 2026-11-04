@@ -97,7 +97,7 @@ fn nexus_core_不依赖任何内部_crate() {
 }
 
 #[test]
-fn 能力层不反向依赖_service_api_cli() {
+fn capability_layer_does_not_depend_on_service_api_cli() {
     // 设计文档 §4.4 规则 1
     let upper = ["nexus-service", "nexus-api", "nexus-cli"];
 
@@ -116,7 +116,7 @@ fn 能力层不反向依赖_service_api_cli() {
 }
 
 #[test]
-fn 能力层不依赖_nexus_repo() {
+fn capability_layer_does_not_depend_on_nexus_repo() {
     // 设计文档 §4.1.2：能力层绝不能反向依赖数据层，
     // 否则 `repo → rag` 的单向依赖会被打破，形成真正的环。
     const CAPABILITY: &[&str] = &[
@@ -147,7 +147,7 @@ fn 能力层不依赖_nexus_repo() {
 }
 
 #[test]
-fn 依赖图无环() {
+fn dependency_graph_is_acyclic() {
     // 设计文档 §4.1.2：Kahn 算法做拓扑排序。若无法排完，说明存在环。
     let crates: Vec<String> = all_crates();
 
@@ -245,7 +245,7 @@ fn nexus_model_不含数据库痕迹() {
 }
 
 #[test]
-fn 所有_crate_声明了_workspace_lints() {
+fn all_crates_declare_workspace_lints() {
     for crate_name in all_crates() {
         let manifest = workspace_root()
             .join("crates")
@@ -260,7 +260,7 @@ fn 所有_crate_声明了_workspace_lints() {
 }
 
 #[test]
-fn 所有_crate_不得硬编码依赖版本() {
+fn all_crates_must_not_hardcode_dependency_versions() {
     for crate_name in all_crates() {
         let (_, dep_lines) = parse_manifest(&crate_name);
         for line in dep_lines {
@@ -290,7 +290,7 @@ fn workspace_锁定文件存在且同步() {
 }
 
 #[test]
-fn 每个_crate_都有_lib_或_bin_入口() {
+fn every_crate_has_lib_or_bin_entry() {
     for crate_name in all_crates() {
         let dir = workspace_root()
             .join("crates")
