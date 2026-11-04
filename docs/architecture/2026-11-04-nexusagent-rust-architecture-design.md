@@ -1923,6 +1923,13 @@ P1 的完成判据「负向测试通过」由 NEX-4 承担、NEX-7 确认其**�
 | `rand 0.10` 拆分 `Rng` / `RngExt` | 编译实测 |
 | `aes-gcm 0.11` 移除 `aead::OsRng`；`Nonce::from_slice` 已废弃 | 编译实测 |
 | `redis 2.0` 的 `ConnectionManager::new` 已 async 化 | 编译实测 |
+| **`redis 2.0` 没有 `ConnectionManager::new_lazy`**（只有 `new_lazy_with_config`） | 源码实测 |
+| **`redis` 的 `ConnectionManager::new` 最坏挂 30 秒**（内部 6 次重试 + 指数退避） | 挂起对端实测 |
+| **`milvus` 的客户端构造只做 TCP 连接**，HTTP/2 握手是延迟的 | 挂起对端实测 |
+| **`milvus` 的 `timeout()` 是请求超时**，建连超时未被设置 | 源码实测 |
+| **`milvus` 的 `AuthInterceptor` 派生 `Debug`** 会打印认证 token | 源码实测 |
+| **`object_store` 默认 `allow_http = false`**（只允许 https） | 源码实测 |
+| **`object_store` 的客户端构造是纯本地的**（不发网络请求） | 实测 |
 | `rmcp 3.8` 服务端与客户端**两端都可用** | `examples/demo-rmcp-boundary` 实测 |
 | `rmcp` 的 `Parameters<T>` 在 `handler::server::wrapper`（非 `model`） | 编译实测 |
 | `rmcp` 工具方法须用 `#[rmcp::tool]` 全路径限定 | 编译实测 |
