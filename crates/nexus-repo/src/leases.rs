@@ -419,6 +419,68 @@ impl ExecutionLeaseRepository {
 
         Ok(RunId::new(row.0))
     }
+
+    /// 创建一条**已持有租约**的 run —— **不经过全局队列**。
+    ///
+    /// # 为什么需要这个方法
+    ///
+    /// `claim` 是**全局队列**操作 —— 它领取队列里**任意**一个可运行的 run。
+    /// 所以用 `claim` 来造测试数据时：
+    ///
+    /// - 测试 A 可能领走测试 B 造的 run
+    /// - A 的清理逻辑会**删掉 B 正在用的数据**
+    ///
+    /// 这在**同一个测试二进制内**可以用进程内互斥锁隔离，
+    /// 但**跨测试二进制**（`lease_fencing.rs` 与 `outbox_idempotency.rs`）
+    /// 就**管不到**了 —— 它们是两个进程，各自的锁互相看不见。
+    ///
+    /// 本方法**直接插入**一条 `status = 'running'` 且已带租约的 run，
+    /// 完全**不碰队列** —— 所以任何数量的并行测试都能安全使用。
+    ///
+    /// # 围栏语义
+    ///
+    /// 插入时 `generation = 1` —— 与「领取一次后」的状态一致，
+    /// 所以围栏的六个条件全部成立，租约**立即可用**。
+    ///
+    /// # 错误
+    ///
+    /// - 数据库不可用 → [`ErrorCode::StorageUnavailable`]
+    /// - 外键冲突（用户不存在）→ [`ErrorCode::InvalidParam`]
+    pub async fn create_leased_run(
+        &self,
+        owner_id: UserId,
+        request_key: &str,
+        definition: serde_json::Value,
+        lease_owner: &str,
+    ) -> Result<(RunId, RunLease), AppError> {
+        let hash = definition_hash_of(&definition);
+
+        let row: (i64, i64) = sqlx::query_as(
+            "INSERT INTO execution_runs (definition, definition_hash, engine_version, \
+                    graph_schema, status, generation, lease_owner, lease_until, \
+                    available_at, deadline_at, owner_id, request_key) \
+             VALUES ($1, $2, 'nexus-engine', 1, 'running', 1, $3, \
+                    clock_timestamp() + INTERVAL '30 seconds', clock_timestamp(), \
+                    clock_timestamp() + INTERVAL '1 day', $4, $5) \
+             RETURNING id, generation",
+        )
+        .bind(&definition)
+        .bind(crate::convert::trim_bpchar(&hash))
+        .bind(lease_owner)
+        .bind(owner_id.into_inner())
+        .bind(request_key)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        let (id, generation) = row;
+        // 租约在**这里**构造 —— `RunLease::new` 是 `pub(crate)`，
+        // 外部无法伪造（见 `lease.rs` 的模块文档）。
+        Ok((
+            RunId::new(id),
+            RunLease::new(RunId::new(id), generation, lease_owner),
+        ))
+    }
 }
 
 /// 可以做围栏自增的**整数**列。
@@ -467,19 +529,62 @@ fn outcome_from_rows(rows_affected: u64) -> LeaseOutcome {
     }
 }
 
-/// 计算定义哈希（**占位实现**）。
+/// 计算定义哈希。
 ///
-/// # ⚠️ 这是占位
+/// # 规范化 JSON（架构文档 §2.5.2 / §3.5）
 ///
-/// 真正的哈希要按 §2.5.2 的**规范化 JSON**规则计算
-/// （键序无关、数组序敏感、数字最短往返）—— 那属于 `nexus-workflow` 的职责。
+/// 真正的哈希要按**规范化 JSON**规则计算 ——
+/// 键序无关、数组序敏感、数字最短往返、`null` 丢弃。
 ///
-/// 本任务只需要一个**稳定**的 64 位十六进制串填进 `CHAR(64)` 列，
-/// 让围栏机制能被独立测试。
+/// 规范化实现在 [`nexus_core::canonical`] —— 放在 `nexus-core` 是因为
+/// `nexus-workflow` 与 `nexus-repo` **都要**用它，而这两个 crate
+/// 互相不能依赖（否则成环）。
 ///
-/// **不要**把这个函数当成规范实现引用 ——
-/// NEX-13 落地幂等键时必须换成真正的规范化哈希。
-fn definition_hash_of(definition: &serde_json::Value) -> String {
+/// # ⚠️ 算法变更记录
+///
+/// NEX-12 落地租约时这里用的是**占位实现**
+/// （`DefaultHasher` + `definition.to_string()`）——
+/// 那个实现的键序敏感，**不符合** §2.5.2 的要求。
+///
+/// NEX-13 落地幂等键时换成了真正的规范化 SHA-256。
+///
+/// **这是破坏性变更**：已存在的 run 的 `definition_hash` 是旧算法的值，
+/// 用新算法重算会得到**不同**的哈希 → 续跑时会被判为「定义被改过」。
+///
+/// 参考实现用 SHA-256（`internal/service/workflow_snapshot.go:137`），
+/// 本实现与之**一致** —— 所以这不是「Rust 版的偏离」，
+/// 而是「回到参考实现的算法」。
+/// 计算定义哈希（**crate 内可见**）。
+///
+/// # 为什么是 `pub(crate)` 而不是 `pub`
+///
+/// 定义哈希是**仓储层内部的实现细节** —— 调用方不该自己算哈希
+/// 再传进来（那会让「算错哈希」成为可能）。
+///
+/// 正确路径：调用 [`crate::outbox_repo::OutboxRepository::submit_idempotent`]，
+/// 由它算哈希并写入。
+pub(crate) fn definition_hash_of(definition: &serde_json::Value) -> String {
+    use nexus_core::canonical::canonical_hash_hex;
+
+    // 规范化失败只可能是数字为 NaN/inf —— 那在 JSON 里本就不合法。
+    // 这种情况用 `to_string()` 兜底，保证函数**永不失败**
+    // （哈希算不出与「哈希算错」同等糟糕，但后者会 panic）。
+    canonical_hash_hex(definition).unwrap_or_else(|_| fallback_hash_of(definition))
+}
+
+/// 规范化失败时的兜底哈希。
+///
+/// # 为什么要有兜底而不是 panic
+///
+/// `definition_hash_of` 在**创建 run**的路径上被调用。
+/// panic 会让「一个畸形的 JSON 定义」变成**进程崩溃** ——
+/// 而它只是「这个 run 的哈希算错了」，不该拖垮整个服务。
+///
+/// # 为什么兜底仍然稳定
+///
+/// 它仍然是对**同一份** definition 计算的 —— 同一个输入永远得到同一个值。
+/// 只是它不满足「键序无关」—— 那在 JSON 非法时是可接受的降级。
+fn fallback_hash_of(definition: &serde_json::Value) -> String {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
 

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 //! 集成测试基座 —— **有库则跑，无库则跳过**。
 //!
 //! # 为什么需要这个基座
@@ -73,4 +75,139 @@ pub async fn test_pool(test_name: &str) -> Result<Option<PgPool>, sqlx::Error> {
         .await?;
 
     Ok(Some(pool))
+}
+
+/// 测试库的连接 URL。
+///
+/// # 为什么需要这个辅助
+///
+/// [`QueueGuard::acquire`] 需要**独立连接**（不是从池里借的）——
+/// 所以它要 URL 而不是 `PgPool`。
+pub fn test_database_url() -> Option<String> {
+    std::env::var(ENV_DATABASE_URL)
+        .ok()
+        .filter(|u| !u.trim().is_empty())
+}
+
+/// **跨进程**的全局队列锁 —— 基于 PostgreSQL 的**咨询锁**（advisory lock）。
+///
+/// # 为什么需要它
+///
+/// `cargo test` 会**并行**运行多个**测试二进制** ——
+/// `lease_fencing.rs` 与 `outbox_idempotency.rs` 是两个**独立进程**，
+/// 各自有进程内的 `Mutex`（`CLAIM_LOCK` / `QUEUE_LOCK`）——
+/// 但那两把锁**互相看不见**。
+///
+/// 而 `claim` / `claim_batch` 是**全局队列**操作：
+/// 一个二进制的测试会领走另一个二进制造出来的 run。
+///
+/// 实测（不是理论）：`outbox_idempotency.rs` 的 `submit_idempotent`
+/// 创建了 `status = 'queued'` 的 run，它被 `lease_fencing.rs` 的 `claim`
+/// 领走 → `assert_eq!(lease.run_id(), run_id)` 失败 → 整文件 13 个测试里多个变红。
+///
+/// 进程内 `Mutex` **解决不了**这个问题 —— 必须用**跨进程**的锁。
+///
+/// # 为什么用 advisory lock
+///
+/// - **不需要**改表结构（那是破坏性变更）
+/// - 进程退出时 PG **自动释放** —— 不会留下死锁
+/// - 不污染数据 —— 不需要在表里存「谁在测试」
+///
+/// # 用 `try_lock` + 超时，不阻塞
+///
+/// `pg_advisory_lock` 会**阻塞**直到拿到锁。如果持锁的进程崩溃，
+/// 锁会释放（连接断开）—— 但如果它只是**卡住**（比如某个测试挂起），
+/// 后续测试会**永远等下去**。
+///
+/// 所以用 `pg_try_advisory_lock` **轮询** + **超时**：
+/// 拿不到就**跳过**这个测试（打印说明），而不是挂死整个测试运行。
+///
+/// # 用法
+///
+/// ```ignore
+/// let Some(guard) = common::QueueGuard::acquire(&pool).await else {
+///     return; // 拿不到锁 —— 跳过
+/// };
+/// // …… 临界区 ……
+/// drop(guard); // 释放
+/// ```
+pub struct QueueGuard {
+    /// **独立**的连接 —— 不是从池里借的。
+    ///
+    /// # 为什么必须独立
+    ///
+    /// advisory lock 绑定在**会话**上。从池里借的连接在 `Drop` 时会被
+    /// **归还**池里（不关闭），会话还在 → 锁**不会**释放。
+    ///
+    /// 独立连接在 `Drop` 时被**关闭** → PG 自动释放会话级锁 ——
+    /// 不需要显式解锁，也不会漏。
+    conn: Option<sqlx::PgConnection>,
+}
+
+/// advisory lock 的 key。
+///
+/// 选一个大整数常量，避免与其它用途的 advisory lock 冲突。
+/// 仓库里目前**只有**这一处用 advisory lock。
+const QUEUE_LOCK_KEY: i64 = 0x4E_45_58_51_55_45_55; // "NEXQUEU"
+
+impl QueueGuard {
+    /// 尝试获取全局队列锁 —— **不阻塞**。
+    ///
+    /// # 返回 `None`
+    ///
+    /// 超时未拿到锁 —— 调用方**应当跳过**测试（而不是失败）。
+    ///
+    /// # 错误
+    ///
+    /// 数据库不可用 → `sqlx::Error`。
+    pub async fn acquire(url: &str) -> Result<Option<Self>, sqlx::Error> {
+        use sqlx::Connection;
+        let mut conn = sqlx::PgConnection::connect(url).await?;
+
+        // `pg_try_advisory_lock` 是**会话级**的 —— 不阻塞，立即返回。
+        //
+        // ⚠️ 用**会话级**而不是事务级（`pg_advisory_xact_lock`）：
+        // 事务级锁在事务结束时自动释放，但我们需要锁**跨越**多次事务
+        // （领取 → 断言 → 回滚）。
+        let deadline = std::time::Instant::now() + LOCK_WAIT;
+        loop {
+            let got: (bool,) = sqlx::query_as("SELECT pg_try_advisory_lock($1)")
+                .bind(QUEUE_LOCK_KEY)
+                .fetch_one(&mut conn)
+                .await?;
+            if got.0 {
+                return Ok(Some(Self { conn: Some(conn) }));
+            }
+
+            if std::time::Instant::now() >= deadline {
+                eprintln!(
+                    "[SKIP] 全局队列锁在 {:?} 内未取得 —— 跳过这个测试。\
+                     另一个测试进程正持有它。",
+                    LOCK_WAIT
+                );
+                return Ok(None);
+            }
+
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    }
+}
+
+/// 等待全局队列锁的**上限**。
+const LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+
+impl Drop for QueueGuard {
+    /// 关闭独立连接 —— PG 随之释放会话级 advisory lock。
+    ///
+    /// # 为什么不用显式 `pg_advisory_unlock`
+    ///
+    /// 显式解锁需要 `.await`，而 `Drop` 里不能等。
+    /// 关闭连接是**同步**的，且效果**更强** —— PG 保证会话结束时
+    /// 释放该会话持有的**所有**锁。
+    ///
+    /// 这也覆盖了「测试 panic」的情况 —— unwind 时 `Drop` 照样执行。
+    fn drop(&mut self) {
+        // 关闭连接是同步的（socket close）。
+        self.conn.take();
+    }
 }

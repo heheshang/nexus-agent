@@ -18,6 +18,7 @@
 //! | [`cancel`] | 取消语义类型状态 | 架构文档 §2.1 |
 //! | [`event`] | 事件负载（12 种）+ 单写者事件流 | 架构文档 §2.2 |
 //! | [`error`] | 三层错误模型 + 42 个业务码 | 架构文档 §2.6 |
+//! | [`canonical`] | 规范化 JSON + 定义哈希 | 架构文档 §3.5 |
 //!
 //! # 依赖位置
 //!
@@ -25,11 +26,13 @@
 //! 它的依赖只有外部 crate —— `serde` / `uuid` / `thiserror` / `tokio-util` / `futures`。
 
 pub mod cancel;
+pub mod canonical;
 pub mod error;
 pub mod event;
 pub mod id;
 
 pub use cancel::{DetachedScope, PersistError, RequestScope};
+pub use canonical::{CanonicalizeError, canonical_hash, canonical_hash_hex, canonicalize};
 pub use error::{ALL_CODES, AppError, ErrorCode, ModelError, RetryPolicy, UserFacing};
 pub use event::{
     AgentEventKind, EVENT_NAMES, Event, EventChannel, EventPayload, EventSink, EventStream,

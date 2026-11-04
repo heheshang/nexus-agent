@@ -1193,6 +1193,24 @@ pub fn canonicalize(value: &Value) -> Result<Vec<u8>, CanonicalizeError>;
 
 **测试要求**：性质测试 —— 任意两个语义相同的 JSON，规范化结果必须字节相同。
 
+> **落地记录（2026-11-04，NEX-13 完成）**：生产实现在
+> `crates/nexus-core/src/canonical.rs`（`canonicalize` / `canonical_hash` /
+> `canonical_hash_hex`），**位置由依赖方向唯一决定** ——
+> `nexus-repo` 与 `nexus-workflow` 互相不能依赖（否则成环），
+> 只有 `nexus-core`（依赖图的根）能同时被两者依赖。
+>
+> 实测纠正两处细节：
+>
+> 1. **`serde_json` 认为 `1.0` 与 `1` 是不同的值**（`"1.0" == "1"` 为 `false`）——
+>    所以规范化必须**自己**做「浮点整数化」，不能只看存储类型。
+> 2. **Rust 的 `f64` `Display` 从不使用指数形式** ——
+>    `1.7976931348623157e308` 会被写成 309 位十进制数字，那个字符串**解析不回来**。
+>    实现借用 `serde_json::Number::from_f64`（内部用 ryu），不重复造轮子。
+>
+> 另有**结构层架构测试** `canonicalization_lives_in_nexus_core_only`
+> 把「实现只有一份」钉死 —— 它同时证明 `nexus-core` **有**实现、
+> `nexus-repo` 与 `nexus-workflow` **没有**自己的实现。
+
 ## 3.6 沙箱
 
 参考实现的危险工具（SQL 查询、代码执行）走沙箱。
@@ -1705,6 +1723,8 @@ Rust 的测试可以验证「某段代码**不能**编译」：
 | 能力层不依赖 `nexus-repo` | §4.1.2（防环） | ✅ 已有 |
 | `nexus-repo` 只依赖能力层（单向） | §4.1.2 | ✅ 已落地（`check-deps.sh` 规则 5 + `Cargo.toml` ↔ `deps_of` 一致性核对，NEX-11） |
 | 行类型列名与真实 schema 一致 | §3.9.3（`query_as` 运行期校验的代价） | ✅ 已落地（`nexus-repo` 的 `schema_conformance` 集成测试，NEX-11） |
+| outbox 表挂在**引擎侧** | §4.2 差异 1 | ✅ 已落地（NEX-13 的 `outbox_tables_are_engine_side_only` 源码扫描） |
+| 规范化 JSON 的实现**只有一份**（在 `nexus-core`） | §3.5 + §4.4 规则 2 | ✅ 已落地（NEX-13 的 `canonicalization_lives_in_nexus_core_only`） |
 
 > **落地记录（2026-11-04，P1 完成）**：本表的后两项属于 **P2** ——
 > `workflow_runs` 的写入者与 `nexus-repo` 的依赖面都要等 P2 的
@@ -1744,6 +1764,9 @@ Rust 的测试可以验证「某段代码**不能**编译」：
 | 归属校验下沉到 SQL WHERE | 越权查询返回 `None` 而非 403 | ✅ 已验证（NEX-11 `find_owned_rejects_other_users_session`） |
 | SQL 只读守卫 | AST 解析拒绝写操作 / 多语句 / CTE 写 | ✅ 已验证（`demo-sql-guard`） |
 | 消费者定义 trait 不产生环 | `repo → rag` 单向依赖 | ✅ 已验证（`demo-consumer-trait`） |
+| 事件与 outbox **同事务** | 提交后二者同时可见；未提交时都不可见 | ✅ 已验证（NEX-13 `event_and_outbox_are_written_in_the_same_transaction`） |
+| 序号分配与写入**同事务** | 故意回滚后 `next_seq` **不前进** | ✅ 已验证（NEX-13 `rolled_back_transaction_does_not_advance_seq`，变异测试确认有效） |
+| 幂等键重复提交返回既有 run | 同键提交两次 → 同 run ID，库中只一条 | ✅ 已验证（NEX-13 `duplicate_submit_returns_the_existing_run`） |
 
 > ✅ 已验证项均在 2026-11-04 实测（PostgreSQL 17 / Rust 1.99.1）。
 >

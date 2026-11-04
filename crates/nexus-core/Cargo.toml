@@ -13,6 +13,8 @@ thiserror.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 bytes.workspace = true
+# 规范化 JSON 的 SHA-256 哈希（架构文档 §3.5）
+sha2.workspace = true
 # 取消语义：CancellationToken（架构文档 §2.1.5）
 tokio-util.workspace = true
 # 事件流：Stream 抽象（架构文档 §2.2.3）

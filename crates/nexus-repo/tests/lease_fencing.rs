@@ -48,13 +48,35 @@ use nexus_model::NewUser;
 use nexus_repo::{
     CounterColumn, ExecutionLeaseRepository, LeaseSettings, RunLease, UserRepository,
 };
-use tokio::sync::Mutex;
 use uuid::Uuid;
 
-/// **全局**领取互斥锁。
+/// **跨进程**的全局队列锁（PG advisory lock）。
 ///
-/// 见模块文档 —— 领取是全局队列操作，测试必须串行。
-static CLAIM_LOCK: Mutex<()> = Mutex::const_new(());
+/// # 为什么不是进程内的 `tokio::Mutex`
+///
+/// `cargo test` 会**并行**运行多个**测试二进制** ——
+/// 本文件与 `outbox_idempotency.rs` 是两个**独立进程**。
+///
+/// 进程内的 `Mutex` 对**另一个进程**完全无效。而 `claim` 是**全局队列**操作 ——
+/// 一个进程会领走另一个进程造出来的 run。
+///
+/// 跨进程只能用 **PostgreSQL 的 advisory lock** ——
+/// 它由**数据库**仲裁，跨进程有效。
+///
+/// # 获取失败 → 跳过
+///
+/// 拿不到锁说明**另一个进程正持有**它。本测试**跳过**（而不是失败）——
+/// 挂死整个测试运行比跳过一个测试糟糕得多。
+async fn acquire_queue_lock() -> Option<common::QueueGuard> {
+    let url = common::test_database_url()?;
+    match common::QueueGuard::acquire(&url).await {
+        Ok(guard) => guard,
+        Err(e) => {
+            eprintln!("[SKIP] 获取全局队列锁失败：{e}");
+            None
+        }
+    }
+}
 
 /// 造一个唯一的 `request_key`。
 fn unique_request_key() -> String {
@@ -83,9 +105,75 @@ async fn create_user(pool: &sqlx::PgPool) -> UserId {
 /// 造一个可领取的 run。
 async fn create_queued_run(pool: &sqlx::PgPool, owner_id: UserId) -> RunId {
     let repo = ExecutionLeaseRepository::new(pool.clone());
-    repo.create_queued_run(owner_id, &unique_request_key(), serde_json::json!({"a": 1}))
+    let run_id = repo
+        .create_queued_run(owner_id, &unique_request_key(), serde_json::json!({"a": 1}))
         .await
-        .expect("创建 run 失败")
+        .expect("创建 run 失败");
+
+    // 登记 —— 测试结束时删除。
+    //
+    // # 为什么必须登记
+    //
+    // `claim` 领取队列里**任意**一个可运行的 run。留在库里的 `queued` 行
+    // 会被**别的**测试的 `claim` 领走 → 那个测试断言
+    // 「领到的就是我造的那个」就**失败**。
+    //
+    // 删除数据是**唯一**可靠的隔离手段 —— 锁只保证「不同时领取」，
+    // 不保证「领到的是自己的」。
+    TRACKED.lock().expect("锁中毒").push(run_id);
+
+    run_id
+}
+
+/// 本文件创建的所有 run —— 测试结束时**删除**。
+///
+/// # ⚠️ 为什么是**全局**的，而不是每个测试各自持有
+///
+/// `cargo test` 在同一个二进制内**并行**执行测试。
+/// 每个测试各自持有自己的列表时，测试 A 的清理**不会**误删测试 B 的数据 ——
+/// 那才是正确的隔离。
+///
+/// 但这里必须用**全局**的，原因是 `create_queued_run` 是一个**共享辅助函数**，
+/// 它不知道调用者是谁。
+///
+/// # ⚠️ 全局列表的**代价**
+///
+/// `cleanup_tracked_runs` 会清空**全部**登记的 run ——
+/// 包括**其它并行测试**刚创建、还在用�� run。
+///
+/// 这是**已知的数据竞争**。它之所以可接受：
+///
+/// 1. 每个测试都持有**全局队列锁**（advisory lock）——
+///    所以同一时刻**只有一个**测试在跑。
+/// 2. advisory lock 是**跨进程**的 —— `outbox_idempotency.rs` 也拿它。
+///
+/// 所以「并行」实际上被**锁**串行化了 —— 全局列表不会有并发访问。
+///
+/// # 为什么不能靠锁解决
+///
+/// 锁保证的是「不同时领取」，**不是**「领到的是自己的」。
+/// 两个测试各自造了 run，A 的 `claim` 可能领到 B 的 ——
+/// 那个只能靠**删除自己的数据**来避免。
+static TRACKED: std::sync::Mutex<Vec<RunId>> = std::sync::Mutex::new(Vec::new());
+
+/// 删除所有被跟踪的 run（及其事件与 outbox 消息）。
+async fn cleanup_tracked_runs(pool: &sqlx::PgPool) {
+    let ids: Vec<i64> = TRACKED
+        .lock()
+        .expect("锁中毒")
+        .drain(..)
+        .map(|id| id.into_inner())
+        .collect();
+
+    for id in ids {
+        for sql in [
+            "DELETE FROM execution_outbox WHERE run_id = $1",
+            "DELETE FROM execution_events WHERE run_id = $1",
+            "DELETE FROM execution_runs WHERE id = $1",
+        ] {
+            let _ = sqlx::query(sql).bind(id).execute(pool).await;
+        }
+    }
 }
 
 /// 把 run 重置为「可领取」—— 模拟 worker 崩溃后租约被回收。
@@ -150,7 +238,9 @@ async fn three_concurrent_claimers_get_different_runs() {
         return;
     };
 
-    let _guard = CLAIM_LOCK.lock().await;
+    let Some(_guard) = acquire_queue_lock().await else {
+        return;
+    };
 
     let user_id = create_user(&pool).await;
 
@@ -201,8 +291,8 @@ async fn three_concurrent_claimers_get_different_runs() {
             "领到的 run {id} 不在预期集合内：{created:?}"
         );
     }
+    cleanup_tracked_runs(&pool).await;
 }
-
 #[tokio::test]
 async fn claim_returns_none_when_queue_is_empty() {
     let Some(pool) = common::test_pool("claim_returns_none_when_queue_is_empty")
@@ -212,7 +302,9 @@ async fn claim_returns_none_when_queue_is_empty() {
         return;
     };
 
-    let _guard = CLAIM_LOCK.lock().await;
+    let Some(_guard) = acquire_queue_lock().await else {
+        return;
+    };
 
     // 把所有行的 `available_at` 推到未来 —— 让任何行都**不可领取**。
     //
@@ -241,7 +333,6 @@ async fn claim_returns_none_when_queue_is_empty() {
 // ─────────────────────────────────────────────────────────
 // AC #6 / #7：fencing 拒绝僵尸写入，放行当前持有者
 // ─────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn stale_generation_write_is_rejected() {
     let Some(pool) = common::test_pool("stale_generation_write_is_rejected")
@@ -251,7 +342,9 @@ async fn stale_generation_write_is_rejected() {
         return;
     };
 
-    let _guard = CLAIM_LOCK.lock().await;
+    let Some(_guard) = acquire_queue_lock().await else {
+        return;
+    };
 
     let user_id = create_user(&pool).await;
     let run_id = create_queued_run(&pool, user_id).await;
@@ -306,8 +399,8 @@ async fn stale_generation_write_is_rejected() {
         .expect("查询状态失败")
         .expect("run 应存在");
     assert_eq!(status.0, "running", "僵尸写入不应改动状态");
+    cleanup_tracked_runs(&pool).await;
 }
-
 #[tokio::test]
 async fn current_holder_write_is_applied() {
     let Some(pool) = common::test_pool("current_holder_write_is_applied")
@@ -317,7 +410,9 @@ async fn current_holder_write_is_applied() {
         return;
     };
 
-    let _guard = CLAIM_LOCK.lock().await;
+    let Some(_guard) = acquire_queue_lock().await else {
+        return;
+    };
 
     let user_id = create_user(&pool).await;
     let run_id = create_queued_run(&pool, user_id).await;
@@ -349,8 +444,8 @@ async fn current_holder_write_is_applied() {
         .expect("查询状态失败")
         .expect("run 应存在");
     assert_eq!(status.0, "done");
+    cleanup_tracked_runs(&pool).await;
 }
-
 #[tokio::test]
 async fn reclaim_after_expiry_bumps_generation() {
     let Some(pool) = common::test_pool("reclaim_after_expiry_bumps_generation")
@@ -360,7 +455,9 @@ async fn reclaim_after_expiry_bumps_generation() {
         return;
     };
 
-    let _guard = CLAIM_LOCK.lock().await;
+    let Some(_guard) = acquire_queue_lock().await else {
+        return;
+    };
 
     let user_id = create_user(&pool).await;
     let run_id = create_queued_run(&pool, user_id).await;
@@ -403,8 +500,8 @@ async fn reclaim_after_expiry_bumps_generation() {
 
     // 两个租约指向同一个 run，但只有后者有效。
     assert_eq!(lease_a.run_id(), lease_b.run_id());
+    cleanup_tracked_runs(&pool).await;
 }
-
 #[tokio::test]
 async fn expired_lease_blocks_writes_even_with_matching_generation() {
     let Some(pool) = common::test_pool("expired_lease_blocks_writes_even_with_matching_generation")
@@ -414,7 +511,9 @@ async fn expired_lease_blocks_writes_even_with_matching_generation() {
         return;
     };
 
-    let _guard = CLAIM_LOCK.lock().await;
+    let Some(_guard) = acquire_queue_lock().await else {
+        return;
+    };
 
     let user_id = create_user(&pool).await;
     let run_id = create_queued_run(&pool, user_id).await;
@@ -450,8 +549,8 @@ async fn expired_lease_blocks_writes_even_with_matching_generation() {
         outcome.is_fenced(),
         "租约过期后即使 generation 匹配也必须被拒绝"
     );
+    cleanup_tracked_runs(&pool).await;
 }
-
 #[tokio::test]
 async fn fenced_counter_increment_is_rejected() {
     let Some(pool) = common::test_pool("fenced_counter_increment_is_rejected")
@@ -461,7 +560,9 @@ async fn fenced_counter_increment_is_rejected() {
         return;
     };
 
-    let _guard = CLAIM_LOCK.lock().await;
+    let Some(_guard) = acquire_queue_lock().await else {
+        return;
+    };
 
     let user_id = create_user(&pool).await;
     let run_id = create_queued_run(&pool, user_id).await;
@@ -497,12 +598,12 @@ async fn fenced_counter_increment_is_rejected() {
     tx.rollback().await.expect("回滚失败");
 
     assert!(outcome.is_fenced(), "过期租约的计数器自增必须被拒绝");
+    cleanup_tracked_runs(&pool).await;
 }
 
 // ─────────────────────────────────────────────────────────
 // AC #8 / #9：类型与时间语义
 // ─────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn lease_holds_typed_run_id() {
     let Some(pool) = common::test_pool("lease_holds_typed_run_id")
@@ -512,7 +613,9 @@ async fn lease_holds_typed_run_id() {
         return;
     };
 
-    let _guard = CLAIM_LOCK.lock().await;
+    let Some(_guard) = acquire_queue_lock().await else {
+        return;
+    };
 
     let user_id = create_user(&pool).await;
     let run_id = create_queued_run(&pool, user_id).await;
@@ -530,8 +633,8 @@ async fn lease_holds_typed_run_id() {
     // 能编译通过，说明它**就是** `RunId` 而不是裸 `i64`。
     let typed: RunId = lease.run_id();
     assert_eq!(typed, run_id);
+    cleanup_tracked_runs(&pool).await;
 }
-
 #[tokio::test]
 async fn lease_expiry_is_judged_by_clock_timestamp() {
     let Some(pool) = common::test_pool("lease_expiry_is_judged_by_clock_timestamp")
@@ -541,7 +644,9 @@ async fn lease_expiry_is_judged_by_clock_timestamp() {
         return;
     };
 
-    let _guard = CLAIM_LOCK.lock().await;
+    let Some(_guard) = acquire_queue_lock().await else {
+        return;
+    };
 
     let user_id = create_user(&pool).await;
     create_queued_run(&pool, user_id).await;
@@ -584,6 +689,7 @@ async fn lease_expiry_is_judged_by_clock_timestamp() {
         delta <= ttl + chrono::Duration::seconds(1),
         "租约到期时间不应超过 TTL：{delta:?} > {ttl:?}"
     );
+    cleanup_tracked_runs(&pool).await;
 }
 
 /// AC #9 —— **长事务**里的过期判定。
@@ -619,7 +725,9 @@ async fn expiry_is_judged_inside_a_long_transaction() {
         return;
     };
 
-    let _guard = CLAIM_LOCK.lock().await;
+    let Some(_guard) = acquire_queue_lock().await else {
+        return;
+    };
 
     let user_id = create_user(&pool).await;
     let run_id = create_queued_run(&pool, user_id).await;
@@ -662,8 +770,8 @@ async fn expiry_is_judged_inside_a_long_transaction() {
         outcome.is_fenced(),
         "长事务里租约过期必须被判定为过期（不能用 now()）"
     );
+    cleanup_tracked_runs(&pool).await;
 }
-
 #[tokio::test]
 async fn lease_ttl_comes_from_configuration() {
     let Some(pool) = common::test_pool("lease_ttl_comes_from_configuration")
@@ -673,7 +781,9 @@ async fn lease_ttl_comes_from_configuration() {
         return;
     };
 
-    let _guard = CLAIM_LOCK.lock().await;
+    let Some(_guard) = acquire_queue_lock().await else {
+        return;
+    };
 
     let user_id = create_user(&pool).await;
     create_queued_run(&pool, user_id).await;
@@ -701,8 +811,8 @@ async fn lease_ttl_comes_from_configuration() {
     tx.rollback().await.expect("回滚失败");
 
     assert!(outcome.is_fenced(), "TTL 到期后写入必须被拒绝");
+    cleanup_tracked_runs(&pool).await;
 }
-
 #[tokio::test]
 async fn claim_does_not_leak_internal_errors() {
     // 指向一个**不存在的**数据库 —— 领取必然失败。
@@ -743,10 +853,64 @@ async fn claim_does_not_leak_internal_errors() {
 fn claim_lock_is_actually_used() {
     // 用源码扫描确认 —— 比运行时计数更直接。
     let src = include_str!("lease_fencing.rs");
-    let count = src.matches("CLAIM_LOCK.lock().await").count();
+    let count = src.matches("acquire_queue_lock().await").count();
 
     assert!(
         count >= 8,
-        "领取类测试必须串行（应至少 8 处持有 CLAIM_LOCK），实际 {count} 处"
+        "领取类测试必须串行（应至少 8 处持有全局队列锁），实际 {count} 处"
+    );
+}
+
+/// 跨进程锁必须是 **advisory lock** —— 进程内的 `Mutex` 对**另一个进程**无效。
+///
+/// # 为什么这条要固化
+///
+/// `cargo test` 会**并行**运行多个**测试二进制**。
+/// 本文件与 `outbox_idempotency.rs` 是两个**独立进程** ——
+/// 它们的进程内 `Mutex` **互相看不见**。
+///
+/// 而 `claim` 是**全局队列**操作：一个进程会领走另一个进程造出来的 run。
+///
+/// 所以锁**必须**由**数据库**仲裁（advisory lock），
+/// 而不是由进程内的 `Mutex` 仲裁。
+///
+/// # 为什么用源码扫描
+///
+/// Rust 没有「负向类型约束」—— 无法在编译期断言「某个类型没被用」。
+/// 只能扫源码。这与 `scripts/check-deps.sh` 规则 3 是同类手法。
+#[test]
+fn the_queue_lock_is_cross_process_not_process_local() {
+    // 只看**代码** —— 跳过注释（注释里提到 `CLAIM_LOCK` 是说明文字）。
+    let src = include_str!("lease_fencing.rs");
+    let code: String = src
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // 断言：进程内的 `Mutex` **不得**出现在代码里。
+    //
+    // ⚠️ 查找串**故意拆开** —— 否则这个断言会匹配到**它自己**
+    // （自匹配的断言永远失败）。
+    const PROCESS_LOCAL_MUTEX: &str = "tokio::sync::";
+    assert!(
+        !code.contains(&format!("{PROCESS_LOCAL_MUTEX}Mutex")),
+        "全局队列锁必须是**跨进程**的（PG advisory lock）—— \
+         进程内的 Mutex 对另一个测试进程无效"
+    );
+
+    // 同理：旧的进程内锁名也要拆开。
+    const OLD_LOCK: &str = "CLAIM_";
+    assert!(
+        !code.contains(&format!("{OLD_LOCK}LOCK")),
+        "旧的进程内锁已被跨进程锁取代"
+    );
+
+    // 断言：跨进程锁确实在用。
+    let common = include_str!("common/mod.rs");
+    assert!(
+        common.contains("pg_try_advisory_lock"),
+        "跨进程锁必须用 pg_try_advisory_lock"
     );
 }

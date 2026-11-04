@@ -23,6 +23,8 @@
 //! | [`sessions`] | 会话仓储 |
 //! | [`lease`] | 租约与 fencing 的**类型**（`Fence` / `RunLease`） |
 //! | [`leases`] | 执行租约的仓储（领取 + 围栏写入） |
+//! | [`outbox`] | 事务 outbox 的**类型**（`OutboxMessage` / `RequestKey` / `SubmitOutcome`） |
+//! | [`outbox_repo`] | outbox 与幂等键的仓储（写入 + 领取 + 幂等提交） |
 //!
 //! # 依赖方向
 //!
@@ -45,6 +47,8 @@ pub mod convert;
 pub mod error;
 pub mod lease;
 pub mod leases;
+pub mod outbox;
+pub mod outbox_repo;
 pub mod rows;
 pub mod sessions;
 pub mod users;
@@ -54,6 +58,10 @@ pub use lease::{Fence, LeaseLost, LeaseOutcome, RunLease};
 pub use leases::{
     CounterColumn, DEFAULT_LEASE_TTL_SECS, ExecutionLeaseRepository, LeaseInfo, LeaseSettings,
 };
+pub use outbox::{
+    MAX_REQUEST_KEY_LEN, MIN_REQUEST_KEY_LEN, OutboxMessage, RequestKey, SubmitOutcome,
+};
+pub use outbox_repo::{AppendedEvent, DEFAULT_OUTBOX_BATCH, OutboxRepository, OutboxTransaction};
 pub use rows::{
     AgentRow, ExecutionApprovalRow, ExecutionAttemptRow, ExecutionCheckpointRow, ExecutionEventRow,
     ExecutionOperationRow, ExecutionOutboxRow, ExecutionRunRow, McpServerRow, MessageRow,
