@@ -4,6 +4,19 @@
 
 **状态：🚧 进行中**
 
+> **本文件是进度视图，不是契约。**
+>
+> AI-SDLC 三层模型（Tier 1 RFC / Tier 2 Spec / Tier 3 Task）下，
+> P3 属于 **Spec 层**（一个特性拆成多个任务）。契约在：
+>
+> | 产物 | 路径 | 作用 |
+> |---|---|---|
+> | Spec | [`docs/specs/p3/spec.md`](../specs/p3/spec.md) | 范围、红线、核心契约、已定稿决策 |
+> | Tasks | [`docs/specs/p3/tasks.md`](../specs/p3/tasks.md) | 逐任务 AC（spec-kit `v0.8-headings` 布局） |
+> | Contracts | [`docs/specs/p3/contracts/`](../specs/p3/contracts/) | 机器可读的不变量与错误码白名单 |
+>
+> 本文件只回答「**进展到哪了**」。
+
 ## 完成判据
 
 架构文档 §6.1：**「预算裁剪与回退边界有测试」**
@@ -24,25 +37,39 @@
 | 预算裁剪测试没覆盖 fallback 路径 | 每次尝试（含 fallback）都要**重跑**裁剪 —— 参考实现的明确不变量 |
 | 熔断测试只测「打开」不测「预热期」 | 预热期样本不足时**不得**评估错误率 —— 否则窗口零值会被误判为真实失败 |
 
+> 这四条防伪要求已落进 `docs/specs/p3/spec.md` §5.1，
+> 并由 `docs/specs/p3/contracts/invariants.json` 的 19 条不变量逐条对应。
+
 ## 任务拆解
 
-| 任务 | 内容 | 依赖 | 对应设计条款 |
-|---|---|---|---|
-| **NEX-16** | `nexus-llm` 的领域类型与供应商描述符 | — | §2.3.2、§2.6.2、§4.2 差异 2 |
-| **NEX-17** | 上下文预算裁剪（`bound_chat_descriptor`） | NEX-16 | §3.1.1、参考架构 §3.1.1 |
-| **NEX-18** | 重试（指数退避 + 抖动）与熔断器（含预热期） | NEX-16 | §2.6.3、参考架构 §3.1.2 / §3.1.3 |
-| **NEX-19** | OpenAI 兼容供应商客户端 + 网关装配 + 回退边界 | NEX-16/17/18 | §2.3.2、§3.3、参考架构 §3.1.5 |
-| **NEX-20** | P3 收口：架构文档同步 + 熔断粒度声明 + CI 门禁 | NEX-16..19 | §5.2、§5.3、§5.4、§6.1 |
+| 任务 | Spec 层 | 内容 | 依赖 | 对应设计条款 | 状态 |
+|---|---|---|---|---|---|
+| **NEX-16** | T-001 | `nexus-llm` 的领域类型与供应商描述符 | — | §2.3.2、§2.6.2、§4.2 差异 2 | ✅ 完成 |
+| **NEX-17** | T-002 | 上下文预算裁剪（`bound_chat_request`） | NEX-16 | §3.1.1、参考架构 §3.1.1 | ✅ 完成 |
+| **NEX-18** | T-003 | 重试（指数退避 + 抖动）与熔断器（含预热期） | NEX-16 | §2.6.3、参考架构 §3.1.2 / §3.1.3 | ✅ 完成 |
+| **NEX-19** | T-004 | OpenAI 兼容供应商客户端 + 网关装配 + 回退边界 | NEX-16/17/18 | §2.3.2、§3.3、参考架构 §3.1.5 | ⬜ Todo |
+| **NEX-20** | T-005 | P3 收口：架构文档同步 + 熔断粒度声明 + CI 门禁 | NEX-16..19 | §5.2、§5.3、§5.4、§6.1 | ⬜ Todo |
 
 依赖图：
 
 ```
-NEX-16 (类型 + 描述符)
-  ├── NEX-17 (预算裁剪)
-  ├── NEX-18 (重试 + 熔断)
-  └── NEX-19 (供应商客户端 + 网关 + 回退边界)
-        └── NEX-20 (收口)
+NEX-16 / T-001 (类型 + 描述符)
+  ├── NEX-17 / T-002 (预算裁剪)
+  ├── NEX-18 / T-003 (重试 + 熔断)
+  └── NEX-19 / T-004 (供应商客户端 + 网关 + 回退边界)
+        └── NEX-20 / T-005 (收口)
 ```
+
+> **T-NNN 是 Spec 层的编号，NEX-nn 是 Task 层的编号。**
+> 两者一一对应，由 `scripts/check-specs.sh` 规则 2 双向校验。
+
+### 已完成部分的交付概览
+
+| 任务 | 交付物 | 验证 |
+|---|---|---|
+| NEX-16 | 9 个协议类型 + 16 个契约测试 + 3 个负向测试 | `nexus-llm/tests/types_contract.rs`、`tests/compile_fail/` |
+| NEX-17 | `bound_chat_request` 纯函数 + 14 个测试 | `nexus-llm/src/budget.rs` |
+| NEX-18 | `retry_do` + `CircuitBreaker` + 结构层断言 | `nexus-llm/src/retry.rs`、`src/breaker.rs`、`tests/architecture.rs` |
 
 ## 两条不可让步的红线
 
@@ -103,10 +130,26 @@ pub enum ModelBackend {
 ## 验证方式
 
 ```bash
-# 门禁（七道）
+# 门禁（八道）
 bash scripts/check-lock.sh && bash scripts/check-deps.sh \
   && bash scripts/check-naming.sh && bash scripts/check-backlog.sh \
+  && bash scripts/check-specs.sh \
   && cargo fmt --all --check \
   && cargo clippy --workspace --all-targets --locked -- -D warnings \
   && cargo test --workspace --locked
 ```
+
+`scripts/check-specs.sh` 是 **Spec 层组织纪律**门禁（新增）：
+
+| 规则 | 拦什么 |
+|---|---|
+| 1. Spec 三件套齐全 | 只做 Task 层、跳过 Spec 层 |
+| 2. `tasks.md` ↔ backlog 双向对应 | 文档漂移（任务被删但文档还在 / 任务没登记进 Spec） |
+| 3. 契约引用的测试必须存在 | 「空头支票」契约 —— 声称有测试验证，实际没有 |
+| 4. 错误码白名单与 `nexus-core` 一致 | §6.3 已定稿条款漂移（改码值 / 加码值） |
+| 5. `nexus-llm` 只用白名单内的码 | 偷偷新增业务码 |
+
+> 三条防伪要求（NEX-14 的教训）同样适用于这个门禁：
+> **门禁本身必须被验证过会红**。已用注入故障验证：
+> 篡改码值 / 引用不存在的测试 / 引用不存在的 backlog 任务 —— 三条均被抓住。
+

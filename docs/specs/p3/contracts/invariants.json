@@ -1,0 +1,202 @@
+{
+  "$schema": "nexus-agent/spec-contract/v1",
+  "spec": "p3",
+  "specRef": "docs/specs/p3/spec.md",
+  "phase": "P3",
+  "crate": "nexus-llm",
+
+  "error_codes": {
+    "$comment": "P3 复用的 nexus-core 已定稿业务码 —— 不得新增，不得改值。",
+    "source": "crates/nexus-core/src/error.rs",
+    "allowed": [
+      { "code": 30006, "variant": "BudgetExceeded", "http": 500, "retry": "Terminal", "p3_use": "预算不足，调用前拒绝" },
+      { "code": 40001, "variant": "RateLimited", "http": 429, "retry": "Retryable", "p3_use": "上游限流" },
+      { "code": 50001, "variant": "ModelUnavailable", "http": 502, "retry": "Retryable", "p3_use": "上游错误 / 熔断打开 / 流已开始" },
+      { "code": 50002, "variant": "ModelTimeout", "http": 504, "retry": "UnknownOutcome", "p3_use": "上游超时" },
+      { "code": 50003, "variant": "ProviderNotFound", "http": 404, "retry": "Terminal", "p3_use": "供应商不存在" },
+      { "code": 90001, "variant": "Internal", "http": 500, "retry": "Terminal", "p3_use": "响应格式非法" },
+      { "code": 90003, "variant": "ServiceUnavailable", "http": 503, "retry": "Retryable", "p3_use": "调用被取消" }
+    ]
+  },
+
+  "invariants": [
+    {
+      "id": "P3-I01",
+      "statement": "预算不足在调用前被拒，返回 BudgetExceeded，且不发起任何上游请求",
+      "layer": "behavior",
+      "verified_by": ["crates/nexus-llm/src/budget.rs::oversized_body_is_rejected_before_any_upstream_call"],
+      "status": "verified"
+    },
+    {
+      "id": "P3-I02",
+      "statement": "预算错误不可重试（RetryPolicy::Terminal）",
+      "layer": "behavior",
+      "verified_by": ["crates/nexus-llm/src/budget.rs::budget_error_is_terminal_not_retryable"],
+      "status": "verified"
+    },
+    {
+      "id": "P3-I03",
+      "statement": "预算裁剪是纯函数 —— 同输入同输出，入参未被修改",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-llm/src/budget.rs::bounding_is_pure",
+        "crates/nexus-llm/src/budget.rs::bounding_does_not_mutate_the_input"
+      ],
+      "status": "verified"
+    },
+    {
+      "id": "P3-I04",
+      "statement": "预算裁剪的双向边界都被测试：恰好填满通过，超出 1 字节拒绝",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-llm/src/budget.rs::a_body_that_exactly_fits_is_accepted",
+        "crates/nexus-llm/src/budget.rs::one_byte_over_the_limit_is_rejected"
+      ],
+      "status": "verified"
+    },
+    {
+      "id": "P3-I05",
+      "statement": "每次尝试（含 fallback）都重跑预算裁剪",
+      "layer": "behavior",
+      "verified_by": ["T-004"],
+      "status": "pending"
+    },
+    {
+      "id": "P3-I06",
+      "statement": "流式首事件之前可回退",
+      "layer": "behavior",
+      "verified_by": ["examples/demo-stream-fallback", "T-004"],
+      "status": "pending"
+    },
+    {
+      "id": "P3-I07",
+      "statement": "流式首事件之后不可回退",
+      "layer": "behavior",
+      "verified_by": ["examples/demo-stream-fallback", "T-004"],
+      "status": "pending"
+    },
+    {
+      "id": "P3-I08",
+      "statement": "fallback 与 primary 是同一供应商时不切换",
+      "layer": "behavior",
+      "verified_by": ["T-004"],
+      "status": "pending"
+    },
+    {
+      "id": "P3-I09",
+      "statement": "两边都失败时，错误信息同时含 primary 与 fallback 的信息",
+      "layer": "behavior",
+      "verified_by": ["T-004"],
+      "status": "pending"
+    },
+    {
+      "id": "P3-I10",
+      "statement": "UnknownOutcome 不重试",
+      "layer": "behavior",
+      "verified_by": ["crates/nexus-llm/src/retry.rs"],
+      "status": "verified"
+    },
+    {
+      "id": "P3-I11",
+      "statement": "熔断预热期不评估错误率",
+      "layer": "behavior",
+      "verified_by": ["crates/nexus-llm/src/breaker.rs"],
+      "status": "verified"
+    },
+    {
+      "id": "P3-I12",
+      "statement": "取消不计入熔断样本",
+      "layer": "behavior",
+      "verified_by": ["crates/nexus-llm/src/retry.rs", "crates/nexus-llm/src/breaker.rs"],
+      "status": "verified"
+    },
+    {
+      "id": "P3-I13",
+      "statement": "nexus-llm 不含 Box<dyn（enum 优于 dyn）",
+      "layer": "structure",
+      "verified_by": ["crates/nexus-llm/tests/architecture.rs"],
+      "status": "verified"
+    },
+    {
+      "id": "P3-I14",
+      "statement": "nexus-llm 不依赖 nexus-repo（网关不查库）",
+      "layer": "structure",
+      "verified_by": ["crates/nexus-llm/tests/architecture.rs", "scripts/check-deps.sh"],
+      "status": "verified"
+    },
+    {
+      "id": "P3-I15",
+      "statement": "熔断器用 std::sync::Mutex 而非 tokio::sync::Mutex",
+      "layer": "structure",
+      "verified_by": ["crates/nexus-llm/tests/architecture.rs"],
+      "status": "verified"
+    },
+    {
+      "id": "P3-I16",
+      "statement": "StreamEvent 不实现 Deserialize —— 错误事件无法从 wire 上还原",
+      "layer": "type",
+      "verified_by": ["crates/nexus-llm/tests/compile_fail/stream_event_cannot_be_deserialized.rs"],
+      "status": "verified"
+    },
+    {
+      "id": "P3-I17",
+      "statement": "ToolDef 的控制面字段不参与序列化",
+      "layer": "type",
+      "verified_by": ["crates/nexus-llm/tests/types_contract.rs"],
+      "status": "verified"
+    },
+    {
+      "id": "P3-I18",
+      "statement": "ModelDescriptor 的 api_key 私有且 Debug 输出脱敏",
+      "layer": "type",
+      "verified_by": ["crates/nexus-llm/tests/compile_fail/descriptor_api_key_is_not_a_public_field.rs"],
+      "status": "verified"
+    },
+    {
+      "id": "P3-I19",
+      "statement": "熔断是单副本粒度（进程内状态）—— 已在 crate 级文档显式声明",
+      "layer": "structure",
+      "verified_by": ["crates/nexus-llm/src/lib.rs", "T-005"],
+      "status": "pending"
+    }
+  ],
+
+  "pipeline_order": [
+    "budget_bounding",
+    "circuit_breaker",
+    "semaphore",
+    "retry",
+    "provider",
+    "fallback"
+  ],
+
+  "decisions": [
+    {
+      "id": "D1",
+      "decision": "供应商多态用 enum + match，不用 Box<dyn>",
+      "basis": "架构文档 §2.3.2",
+      "category": "settled"
+    },
+    {
+      "id": "D2",
+      "decision": "只做 OpenAI 兼容协议（ollama 走 /v1 兼容层）",
+      "basis": "本次决策 —— 引入第二套协议形状在只有一个供应商时没有收益",
+      "category": "decide-and-proceed"
+    },
+    {
+      "id": "D3",
+      "decision": "熔断状态在进程内（std::sync::Mutex + 环形缓冲）",
+      "basis": "本次决策 + 参考架构 §3.1.3；外置到 Redis/PG 属后续特性",
+      "category": "decide-and-proceed"
+    }
+  ],
+
+  "excluded": [
+    { "item": "真实上游连通性", "reason": "P3 不依赖真实模型服务；用本地 mock HTTP server 测" },
+    { "item": "成本核算的准确性", "reason": "token 估算是保守上界，不是厂商计费口径" },
+    { "item": "跨副本熔断一致性", "reason": "熔断是进程内状态，单副本粒度（决策 D3）" },
+    { "item": "ollama 原生协议 /api/chat", "reason": "与 OpenAI 兼容是两套字段形状" },
+    { "item": "SSE 完整分帧", "reason": "属 P5（nexus-api 的 SSE 桥接）" },
+    { "item": "跨副本配额协调", "reason": "属容量治理（nexus-capacity）" }
+  ]
+}

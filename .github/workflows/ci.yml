@@ -88,6 +88,14 @@ jobs:
       - name: 校验 backlog 组织纪律
         run: bash scripts/check-backlog.sh
 
+      # Spec 层组织纪律（AI-SDLC 三层模型 Tier 2）：
+      #   1. 每个 spec 目录必须有 spec.md + tasks.md + contracts/
+      #   2. tasks.md 的 T-NNN 与 backlog 任务双向对应
+      #   3. contracts/ 引用的测试必须真的存在（防「空头支票」契约）
+      #   4. 错误码白名单与 nexus-core 的实际码值一致（防 §6.3 已定稿条款漂移）
+      - name: 校验 Spec 层组织纪律
+        run: bash scripts/check-specs.sh
+
       - name: cargo fmt --check
         run: cargo fmt --all --check
 
