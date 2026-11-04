@@ -2636,9 +2636,28 @@ CREATE UNIQUE INDEX idx_memory_profile_active ON memory_profiles(user_id) WHERE 
 
 **迁移工具**：`sqlx::migrate!`（宏嵌入 `migrations/` 目录，编译进二进制）或 `refinery 0.10`（运行时读目录）。**建议 `sqlx::migrate!`** —— 与 `sqlx` 同源，且迁移文件被打进二进制，部署时不需要额外拷贝目录。
 
-**down 脚本**：Go 版每个迁移都有 `.down.sql`。`sqlx::migrate!` **只支持 up 迁移**（`sqlx migrate revert` 是 CLI 级别的）。若需要 down，用 `refinery`（支持 down 且有命名约定）。**取舍**：Go 版 013 的 down 脚本保留运营政策、租约、运行与公平数据（`docs/research/2026-10-21-p4-capacity-validation.md`：「迁移 013 实际 13→12→13 保留运营政策、租约、运行和公平数据」），这个「down 不删运营数据」的取舍值得抄 —— 但它说明 down 脚本的价值主要在**测试环境的回滚**，生产环境很少用。
+**down 脚本**：Go 版每个迁移都有 `.down.sql`。参考架构文档 §3.9.3 曾写「`sqlx::migrate!` **只支持 up 迁移**（`sqlx migrate revert` 是 CLI 级别的）」—— **这条已过时**。
 
-**建议**：用 `sqlx::migrate!`（只 up），down 脚本作为**独立的 SQL 文件**保留在仓库里，供手工/测试回滚使用。
+> **实测更正（2026-11-04，P2 实施时核对 `sqlx-core-0.9.0` 源码）**：
+>
+> | 事实 | 证据 |
+> |---|---|
+> | sqlx 0.9 **原生支持可逆迁移** | `migrate/migration_type.rs:19` —— `MigrationType::from_filename` 识别 `.up.sql` / `.down.sql` |
+> | 命名格式 `<版本号>_<描述>.up.sql` | `migrate/source.rs:207` —— `splitn(2, '_')` + `ends_with(".sql")` |
+> | **回滚是 API 能力** | `migrate/migrator.rs:314` —— `Migrator::undo(migrator, target)` |
+>
+> **结论**：参考实现的 `.up.sql` / `.down.sql` 命名**可以原样沿用**，
+> 且 up/down 在**同一版本号**下配对 —— 比「down 脚本另存他处」更好，
+> 因为回滚时 `Migrator::undo` 能直接找到配对。
+>
+> ⚠️ **但有一个静默失败陷阱**：文件名不符合 `<版本号>_<描述>.sql` 格式的文件
+> 会被**静默忽略**（`source.rs:210` —— `parts.len() != 2` 就 `continue`）——
+> 那个迁移**根本没跑**，且**不报错**。
+> 必须有测试断言「预期的表都存在」，否则发现不了。
+>
+> 另注：Go 版 013 的 down 脚本保留运营政策、租约、运行与公平数据
+> （`docs/research/2026-10-21-p4-capacity-validation.md`：「迁移 013 实际 13→12→13
+> 保留运营政策、租约、运行和公平数据」），这个「down 不删运营数据」的取舍值得抄。
 
 ### 3.9.4 取舍说明
 

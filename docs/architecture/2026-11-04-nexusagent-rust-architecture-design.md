@@ -22,7 +22,7 @@
 | 维度 | 关系 |
 |---|---|
 | **领域语义** | 继承。状态机、失败分类、审批语义、危险工具边界 —— 这些是领域知识，不是实现风格，必须一致，否则是另一个产品。 |
-| **数据模型** | 继承并扩展。表结构沿用参考实现的演进结果（13 组迁移、43 表），因为它已经承载了领域演进的历史。 |
+| **数据模型** | 继承并扩展。表结构沿用参考实现的演进结果（13 组迁移、**42 表 + 1 视图**），因为它已经承载了领域演进的历史。 |
 | **crate 划分** | **重新设计**。参考实现按 Go 包组织；Rust 版按**依赖方向**与**类型边界**组织。 |
 | **类型设计** | **重新设计**。这是本文档的主体。 |
 | **并发模型** | **重新设计**。参考实现用 goroutine + channel；Rust 版用 structured concurrency + 类型化流。 |
@@ -1755,7 +1755,7 @@ docker run -d --name nexus-test-pg -e POSTGRES_USER=nexus \
   -e POSTGRES_PASSWORD=nexus -e POSTGRES_DB=nexus_design \
   -p 5432:5432 postgres:17
 
-# 2. 应用参考实现的 13 组迁移（建 43 张表）
+# 2. 应用参考实现的 13 组迁移（建 42 张表 + 1 视图）
 cd <NexusAgent-Eino>/backend/migrations
 for f in $(ls *.up.sql | sort); do
   docker exec -i nexus-test-pg psql -U nexus -d nexus_design -v ON_ERROR_STOP=1 -q -f - < "$f"
@@ -1911,7 +1911,7 @@ P1 的完成判据「负向测试通过」由 NEX-4 承担、NEX-7 确认其**�
 | 仅靠 PG 轮询可完成任务（无 Redis） | 集成实测 |
 | `sqlx::query!` 宏在无 `DATABASE_URL` 时**编译失败** | 编译实测 |
 | `cargo sqlx prepare` 生成的离线缓存可让宏在无库环境编译 | 缓存实测 |
-| 参考实现的 13 组迁移在 PostgreSQL 17 上干净应用（43 表） | 全量应用实测 |
+| 参考实现的 13 组迁移在 PostgreSQL 17 上干净应用（42 表 + 1 视图） | 全量应用实测 |
 | `CancellationToken::new()` 不随父取消；`child_token()` 会 | 实测 |
 | **`DetachedScope.cancel()` 编译失败**（类型状态的核心主张） | 负向编译实测 |
 | **事件 enum 序列化为扁平 JSON**（`type` 与字段同级） | 实测 |
@@ -1978,3 +1978,11 @@ P1 的完成判据「负向测试通过」由 NEX-4 承担、NEX-7 确认其**�
 | 依赖行写成 `name = { workspace = true, features = [...] }` | 被架构测试拦下（纪律要求只能是 `name.workspace = true`） | 需要 feature 就改 workspace 根 manifest |
 | 并列两次 `sink.emit(...)` 不触发借用错误 | 两次调用是顺序的，前一个返回值不持有借用，NLL 让第二个合法 | 要验证「独占借用」须**同时持有**两个 `&mut` 引用 |
 | 负向用例的错误码靠直觉写 | 实际是 E0559（非 E0560）、E0499（非 E0502） | 以 `.stderr` 快照为准 —— 快照记录的是编译器**实际行为** |
+
+**P2 实施时新增的 3 条**（2026-11-04，核对 `sqlx-core-0.9.0` 源码 + 实测数据库）：
+
+| 陷阱 | 症状 | 正确做法 |
+|---|---|---|
+| 参考文档说「`sqlx::migrate!` 只支持 up 迁移」 | 沿用「down 脚本另存他处」的方案，放弃了 up/down 同版本号配对 | sqlx 0.9 **原生支持** `.up.sql` / `.down.sql`，`Migrator::undo()` 是 API 能力（`migration_type.rs:19` / `migrator.rs:314`）—— 参考实现命名可原样沿用 |
+| 迁移文件名格式错误 | **静默忽略** —— 那个迁移根本没跑，**且不报错** | 文件名必须 `<整数版本号>_<描述>.sql`；必须有测试断言「预期的表都存在」（`source.rs:207` 用 `splitn(2, '_')`，不匹配就 `continue`） |
+| 表数量「43」 | 实际是 **42 表 + 1 视图**（`execution_active_capacity` 是视图） | 用 `information_schema` 分别统计 `BASE TABLE` 与 `VIEW` —— 视图不是表 |
