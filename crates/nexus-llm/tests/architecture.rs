@@ -150,3 +150,43 @@ fn nexus_llm_dependency_set_matches_the_declared_direction() {
         );
     }
 }
+
+/// 熔断器用 `std::sync::Mutex` 而**不是** `tokio::sync::Mutex`。
+///
+/// # 为什么这条值得断言
+///
+/// 参考架构文档 §3.1.3 明确要求 `std::sync::Mutex`：
+///
+/// - 熔断操作是**纯同步**的、不跨 await —— `tokio::sync::Mutex` 的获取是 async 的，
+///   在热路径上是纯开销。
+/// - 更重要的是 **`std::sync::MutexGuard` 不是 `Send`** ——
+///   编译器会**强制**你不在持锁时 await（跨 await 是编译错误）。
+///   `tokio::sync::MutexGuard` 反而**允许**跨 await —— 那是隐藏的 bug 来源：
+///   锁在 await 期间被释放，另一个 task 拿到锁时状态已经变了。
+///
+/// 也就是说：用 `tokio::sync::Mutex` 不会立刻报错，但会**悄悄**失去这个保护。
+/// 所以这条必须由**断言**钉住，而不是靠代码评审的自觉。
+#[test]
+fn the_breaker_uses_a_standard_mutex_not_a_tokio_mutex() {
+    let breaker_source = std::fs::read_to_string(crate_root().join("src/breaker.rs")).unwrap();
+
+    // ⚠️ 必须**剥离注释**再扫描 ——
+    // 文档注释里提到 `tokio::sync::Mutex` 是**说明性文字**
+    // （解释「为什么不用它」），不是实际使用。
+    // `scripts/check-deps.sh` 规则 6b 用的是同样的剥离手法。
+    let code: String = breaker_source
+        .lines()
+        .map(|line| line.split_once("//").map_or(line, |(code, _)| code))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        !code.contains("tokio::sync::Mutex"),
+        "熔断器必须用 `std::sync::Mutex` —— 它的 guard 非 `Send`，\
+         编译器会强制你不在持锁时 await（参考架构文档 §3.1.3）"
+    );
+    assert!(
+        code.contains("use std::sync::{Arc, Mutex}") || code.contains("use std::sync::Mutex"),
+        "熔断器应显式使用 `std::sync::Mutex`"
+    );
+}

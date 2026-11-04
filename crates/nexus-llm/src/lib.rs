@@ -47,12 +47,16 @@
 //! 参考实现的 `IsRetryable` 把 504（超时，可能已执行）与 502（明确拒绝）
 //! **一视同仁** —— 504 下重试支付类工具会重复扣费。
 
+pub mod breaker;
 pub mod budget;
 pub mod error;
+pub mod retry;
 pub mod types;
 
+pub use breaker::{BreakerConfig, BreakerRegistry, CircuitBreaker};
 pub use budget::{BoundedRequest, bound_chat_request};
 pub use error::LlmError;
+pub use retry::{CallOutcome, RetryConfig, RetryOutcome, is_retryable, record_outcome, retry_do};
 pub use types::{
     ChatRequest, ChatResponse, Message, ModelDescriptor, Role, StreamEvent, ToolCall, ToolDef,
     Usage,
