@@ -43,6 +43,11 @@ jobs:
       - name: 校验标识符命名
         run: bash scripts/check-naming.sh
 
+      # backlog 组织纪律：任务不得同时存在于 tasks/ 与 completed/
+      # （`git mv` 后编辑器可能在旧路径重建同名文件 —— 见 NEX-7 的教训）
+      - name: 校验 backlog 组织纪律
+        run: bash scripts/check-backlog.sh
+
       - name: cargo fmt --check
         run: cargo fmt --all --check
 

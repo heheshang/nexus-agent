@@ -1,7 +1,7 @@
 ---
 id: NEX-7
 title: "test(core): P1 收口 —— 契约测试补全与架构文档同步"
-status: To Do
+status: Done
 assignee: []
 labels: [core, testing, docs, p1]
 priority: medium
@@ -110,6 +110,17 @@ P0 阶段这没问题（没有快照类测试），但 P1 引入 `trybuild` 后�
 它们关于依赖纪律、类型设计、以及「负向用例的错误码要信编译器不要信直觉」。
 已单列一张表追加，避免与 demo 的坑混淆。
 
-**7. `examples/` 的 demo 是 11 个，不是任务初稿写的 12 个 —— 已更正。**
+**7. 归档时发现 `git mv` 之后编辑器在旧路径重建了任务文件 —— 已加门禁。**
+`git mv` 把 NEX-4 / NEX-5 从 `backlog/tasks/` 移到 `backlog/completed/` 后，
+编辑器在原路径**重建**了同名文件（mtime 比提交晚一分钟），
+后续每次 `git add -A` 又把它重新提交。
+结果：NEX-4 与 NEX-5 在两个目录下各存一份，内容完全相同。
+已清除 `tasks/` 下的残留，并新增 `scripts/check-backlog.sh`：
+- 检查同一任务是否同时存在于 `tasks/` 与 `completed/`
+- 检查 `completed/` 下的任务 `status` 是否标记为完成
+  （顺带发现 P1 的四个任务归档时都忘了改 `status: To Do` —— 一并修正）
+该脚本已接入 CI，并**用注入重复文件的方式验证过它真的会红**。
+
+**8. `examples/` 的 demo 是 11 个，不是任务初稿写的 12 个 —— 已更正。**
 `git status examples/` 为空（一个都没删、没改），
 `cd examples && cargo test --workspace` 61 个测试全绿。

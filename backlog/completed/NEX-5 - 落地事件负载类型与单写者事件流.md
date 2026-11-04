@@ -1,7 +1,7 @@
 ---
 id: NEX-5
 title: "feat(core): 落地事件负载类型与单写者事件流"
-status: To Do
+status: Done
 assignee: []
 labels: [core, events, p1]
 priority: high

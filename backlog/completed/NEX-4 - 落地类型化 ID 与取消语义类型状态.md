@@ -1,7 +1,7 @@
 ---
 id: NEX-4
 title: "feat(core): 落地类型化 ID 与取消语义类型状态"
-status: To Do
+status: Done
 assignee: []
 labels: [core, typestate, p1]
 priority: high
