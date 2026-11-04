@@ -144,6 +144,8 @@ evalexpr = "13.1.0"
 # ---- 测试 ----
 tokio-test = "0.4.4"
 tempfile = "3.24.0"
+# 负向测试：断言「写错的代码编译不过」（架构文档 §5.2）
+trybuild = "1.0.116"
 
 # ---- 构建期（集中管理，便于统一升级） ----
 [workspace.lints.rust]
@@ -165,6 +167,7 @@ opt-level = 3
 lto = "thin"
 codegen-units = 1
 # 必须保留 unwind：panic 隔离（工具执行）依赖 catch_unwind / JoinError::is_panic，
-# 改成 abort 会让整个进程被 panic 带走。详见架构文档 §2.7。
+# 改成 abort 会让整个进程被 panic 带走。架构文档未单列该条款，
+# 依据是「工具执行需进程内隔离」这一设计意图。
 panic = "unwind"
 strip = "symbols"
