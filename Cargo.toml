@@ -90,7 +90,7 @@ toml = "1.2.0"
 base64 = "0.23.1"
 
 # ---- 数据库 ----
-sqlx = { version = "0.9.0", default-features = false, features = ["chrono", "postgres", "runtime-tokio", "tls-rustls-ring", "json", "uuid", "migrate"] }
+sqlx = { version = "0.9.0", default-features = false, features = ["chrono", "postgres", "runtime-tokio", "tls-rustls-ring", "json", "uuid", "migrate", "macros"] }
 redis = { version = "2.0.0-rc.2", features = ["tokio-comp", "connection-manager", "script"] }
 deadpool-redis = { version = "0.23.1", features = ["rt_tokio_1"] }
 

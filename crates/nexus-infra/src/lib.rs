@@ -19,9 +19,15 @@
 //! # 子模块
 //!
 //! - [`pg`] —— PostgreSQL 连接池（PG 部分）
+//! - [`migrate`] —— 嵌入式迁移基线
 
+pub mod migrate;
 pub mod pg;
 
+pub use migrate::{
+    Migrator, PHASE0_TABLES, assert_partial_index, assert_phase0_tables, current_version,
+    run as run_migrations, undo as undo_migrations,
+};
 pub use pg::{
     DEFAULT_CONNECT_TIMEOUT_SECS, DEFAULT_MAX_CONNECTIONS, PgHandle, PgSettings,
     SafeConnectOptions, connect, connect_lazy, connect_options, connect_with, pool_options,

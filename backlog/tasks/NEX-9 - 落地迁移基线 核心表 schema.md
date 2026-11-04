@@ -1,7 +1,7 @@
 ---
 id: NEX-9
 title: "feat(infra): 落地迁移基线 —— 核心表 schema"
-status: To Do
+status: Done
 assignee: []
 labels: [infra, postgres, migrations, p2]
 priority: high
@@ -83,18 +83,18 @@ users / agents / tools / sessions / messages / workflow_runs
 
 ## Acceptance Criteria
 
-- [ ] #1 `nexus-infra` 有 `migrations/` 目录，用 `sqlx::migrate!` 嵌入
-- [ ] #2 迁移覆盖 **Phase 0 核心表**（§3.9.4 点名的 7 类 + `execution_*` 7 张）
-- [ ] #3 `execution_runs` 是**独立新建**的表 —— 不是给 `workflow_runs` 加列
-- [ ] #4 部分索引（只索引就绪行）已落地 —— 有测试断言索引存在且带 `WHERE` 子句
-- [ ] #5 幂等键唯一约束已落地 —— `(owner_id, request_key)` 唯一
-- [ ] #6 `replay_policy` 的 CHECK 约束已落地（`readonly` / `idempotent` / `manual`）
-- [ ] #7 迁移在**空库**上可完整应用（连跑两次不报错 —— 幂等）
-- [ ] #8 迁移文件名用 sqlx 0.9 的**可逆格式** `<版本号>_<描述>.up.sql` / `.down.sql`
+- [x] #1 `nexus-infra` 有 `migrations/` 目录，用 `sqlx::migrate!` 嵌入
+- [x] #2 迁移覆盖 **Phase 0 核心表**（§3.9.4 点名的 7 类 + `execution_*` 7 张）
+- [x] #3 `execution_runs` 是**独立新建**的表 —— 不是给 `workflow_runs` 加列
+- [x] #4 部分索引（只索引就绪行）已落地 —— 有测试断言索引存在且带 `WHERE` 子句
+- [x] #5 幂等键唯一约束已落地 —— `(owner_id, request_key)` 唯一
+- [x] #6 `replay_policy` 的 CHECK 约束已落地（`readonly` / `idempotent` / `manual`）
+- [x] #7 迁移在**空库**上可完整应用（连跑两次不报错 —— 幂等）
+- [x] #8 迁移文件名用 sqlx 0.9 的**可逆格式** `<版本号>_<描述>.up.sql` / `.down.sql`
       —— 参考实现的命名可原样沿用；版本号前缀是**整数**（`1` / `2`，非 `001`）
-- [ ] #9 迁移文件的命名与内容有**参考实现对应关系**的记录（哪个文件对应参考实现的哪一组迁移）
-- [ ] #10 `cargo test --workspace --locked` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo fmt --all --check` 通过
-- [ ] #11 CI 六道门禁全绿
+- [x] #9 迁移文件的命名与内容有**参考实现对应关系**的记录（哪个文件对应参考实现的哪一组迁移）
+- [x] #10 `cargo test --workspace --locked` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo fmt --all --check` 通过
+- [x] #11 CI 六道门禁全绿
 
 ## 备注
 
@@ -115,4 +115,90 @@ users / agents / tools / sessions / messages / workflow_runs
 
 ## 实现过程中的发现
 
-<!-- 实现时填写 -->
+**1. sqlx 0.9 的可逆迁移：up 与 down **共享同一个版本号**。**
+初稿的测试断言「版本号全局唯一」，编译能过但**测试失败**（12 vs 6）。
+查 sqlx 官方测试（`sqlx-0.9.0/tests/postgres/migrate.rs:75`）确认：
+`20220721124650_add_table.up.sql` 与 `.down.sql` **同一个版本号** —— 这是设计。
+所以断言改成「同一方向内唯一」。
+
+顺带确认 `Migrator::undo(pool, target)` 的语义：回滚所有 `version > target` 的
+down 迁移。`revert` 会 `DELETE FROM _sqlx_migrations WHERE version = $1` ——
+所以回滚到 0 后**记账表本身还在**（它记录「哪些版本已应用」，
+删掉反而破坏迁移状态）。测试断言已排除 `_sqlx*` 前缀。
+
+**2. `sqlx::migrate!` 宏需要 `macros` feature —— workspace 的 sqlx 声明漏了。**
+根 `Cargo.toml` 的 sqlx 声明了 `migrate` feature，但**没有** `macros`。
+而 `sqlx-macros` 在 sqlx 0.9 里是**可选依赖**，只由 `macros` feature 拉进来
+（`sqlx-0.9.0/Cargo.toml:126`）。
+结果：`sqlx::migrate!` 报 `cannot find 'migrate' in 'sqlx'`。
+
+已在根 manifest 补上 `"macros"`。**这是根 manifest 的改动** —— 按纪律，
+版本与 feature 只在 `[workspace.dependencies]` 声明一次。
+
+**3. PostgreSQL 不支持 `CREATE PRIMARY KEY ... ON ...` 这种独立语句。**
+初稿用了参考实现 `pg_dump` 出来的形式（复合主键用独立语句）。
+实测报 `syntax error at or near "PRIMARY"`（SQLSTATE 42601）。
+正确写法是 `ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY (...)`，
+或者直接写在 `CREATE TABLE` 里。已改成 `ALTER TABLE` 形式。
+
+**4. sqlx 0.9 对动态 SQL 要求显式 `AssertSqlSafe`。**
+集成测试要用 schema 隔离（每个测试一个 schema），拼出来的 SQL 触发
+`E0277: dynamic SQL strings should be audited for possible injections`。
+
+处理方式：**不是**简单地 `unsafe` 绕过，而是加了一道
+`assert_safe_schema_name` 校验（只允许字母数字下划线、不以数字开头），
+让 `AssertSqlSafe` 的使用**有依据**。schema 名全是测试里的字面量常量。
+
+**5. 「跳过」在测试摘要里显示成 `ok` —— 假绿的温床。**
+集成测试的判据是「`DATABASE_URL` 是否存在」，不存在就跳过。
+但 `cargo test` 的摘要把跳过的测试**也**算进 `passed`：
+
+```
+无库：test result: ok. 7 passed; 0 failed    ← 一条都没真跑
+有库：test result: ok. 7 passed; 0 failed    ← 真的跑了
+```
+
+**两个输出完全一样** —— 这正是 NEX-14 的 AC #14 要防的假象。
+
+已堵上：CI 环境下缺 `DATABASE_URL` **直接 panic**，不再跳过。
+本地开发没库时仍然跳过（那不是错误，只是这台机器没准备数据库）。
+CI 已配 `postgres:17` 服务 + `DATABASE_URL` 环境变量。
+
+**6. 集成测试必须 schema 隔离，否则并行跑会互相清空。**
+集成测试要 `DROP SCHEMA` 重建 —— 多个测试**默认并行**跑，
+一个测试的 DROP 会删掉另一个测试刚建的表，且失败原因指向错误的测试。
+已改为每个测试独立 schema（`t_apply` / `t_idem` / …），
+靠连接串的 `search_path` 参数落位。
+
+比「每个测试一个数据库」便宜得多：建库要连 `postgres` 库、要等 DROP DATABASE 完成。
+
+**7. 逐列比对参考实现：17 张共享表**完全一致**。**
+用 `information_schema` 对 `nexus_design`（参考实现）与 `nexus_test`（本版）
+逐列比对列名与类型 —— 17 张表**全部一致**，包括 `users` / `agents` / `tools` /
+`sessions` / `messages` / `workflows` / `workflow_versions` / `workflow_step_runs` /
+`execution_*` 6 张 / `model_*` / `mcp_servers`。
+
+两处刻意偏离的表也验证过了：
+- 参考实现 `workflow_runs` 的 13 个引擎侧字段
+  （`definition` / `definition_hash` / `engine_version` / `graph_schema` /
+  `generation` / `lease_owner` / `lease_until` / `deadline_at` /
+  `available_at` / `next_seq` / `state_version` / `pending_ids` / `request_key`）
+  **全部**迁到了 `execution_runs`（无一遗漏）
+- `workflow_runs` 保留产品侧字段 + 新增 `execution_id` 外键指向 `execution_runs`
+
+**8. 部分索引实测 8 个、CHECK 约束实测 4 个，全部落地。**
+部分索引：`idx_execution_ready` / `idx_execution_active_owner` /
+`idx_execution_live_deadline` / `idx_execution_outbox_pending` /
+`idx_mcp_active_tools` / `idx_mcp_active_servers` / `idx_mcp_tool_identity` /
+`idx_messages_memory_cursor`
+
+CHECK 约束：`tools_replay_policy_check` / `execution_approvals_decision_check` /
+`execution_checkpoints_payload_check` / `mcp_servers_config_version_check`
+
+集成测试断言这些索引的定义**含 `WHERE` 子句** —— 因为少了 `WHERE`
+就会退化成全表索引，大表上从毫秒级变成秒级。
+
+**9. CI 加了 PostgreSQL service。**
+`.github/workflows/ci.yml` 的 `check` 作业加了 `postgres:17` 服务
+（含 `pg_isready` 健康检查）与 `DATABASE_URL` 环境变量。
+版本必须是 17 —— 参考实现的迁移在 17 上干净应用。
