@@ -1,0 +1,63 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  # 依赖缓存目录
+  CARGO_HOME: ${{ github.workspace }}/.cargo-home
+
+jobs:
+  check:
+    name: fmt / clippy / test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      # Cargo.lock 必须入库并与 manifest 同步。
+      # 一旦有人手动改了版本号却没更新 lock，CI 立刻失败。
+      - name: 校验依赖锁定纪律
+        run: bash scripts/check-lock.sh
+
+      # crate 依赖方向铁律（架构文档 §0.3）
+      - name: 校验 crate 依赖方向
+        run: bash scripts/check-deps.sh
+
+      - name: cargo fmt --check
+        run: cargo fmt --all --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: cargo test
+        run: cargo test --workspace --locked
+
+  build:
+    name: release build
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+      - name: cargo build --release
+        run: cargo build --workspace --release --locked
+      - name: 上传二进制
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-binary
+          path: target/release/nexus

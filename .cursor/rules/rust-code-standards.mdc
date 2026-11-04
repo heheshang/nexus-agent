@@ -1,0 +1,130 @@
+---
+description: Rust 代码规范（由 NexusAgent 架构设计文档派生）
+globs: ["**/*.rs"]
+alwaysApply: false
+---
+
+# Rust 代码规范
+
+派生自 `docs/architecture/2026-11-04-nexusagent-rust-architecture-design.md`。该文档是**唯一权威**，冲突时以它为准。
+流程类条款见 `.cursor/rules/ai-sdlc-workflow.mdc`。
+
+---
+
+## 1. 五条设计原则（代码层体现）
+
+| 原则 | 代码要求 |
+|---|---|
+| **非法状态不可表示** | 能用类型表达的约束，禁止用运行时检查。状态机用类型状态（如 `RequestScope` / `DetachedScope`），不用布尔字段组合。 |
+| **边界显式，不用全局状态** | 跨 crate / 跨进程传递的信息必须出现在函数签名上。禁止用全局变量、单例或隐式上下文传递业务数据。 |
+| **不变量优先由类型与编译器保证** | 优先级：类型系统 > 所有权/生命周期 > crate 依赖方向 > 运行时断言+测试 > 文档评审。设计时从上往下用。 |
+| **失败是设计的一部分** | 每个可能失败的操作必须显式建模失败语义（可重试 / 结果未知 / 终止），不能只返回 `Err` 了事。 |
+| **可观测性是结构的一部分** | `trace_id` / 事件序号 / 运行 ID 必须存在于类型字段中，不靠字符串拼接约定。 |
+
+---
+
+## 2. 依赖方向（编译期铁律）
+
+```
+入口 → 协议 → 用例 → 执行 → 数据 → 基础
+```
+
+1. 能力层（`nexus-llm` / `nexus-tool` / `nexus-rag` / `nexus-memory` / `nexus-execution` / `nexus-workflow` / `nexus-capacity` / `nexus-vector`）**不得依赖** `nexus-service` / `nexus-api` / `nexus-cli`。
+2. `nexus-core` **零内部依赖**，是依赖图的根。
+3. **`sqlx` 只允许出现在 `nexus-repo`、`nexus-infra`、`nexus-execution` 三个 crate**。
+   - `nexus-repo`：常规数据访问层，行类型 `#[derive(FromRow)]` 定义在此。
+   - `nexus-infra`：连接管理（PG / Redis / S3 / Milvus）。
+   - `nexus-execution`：**唯一允许写 `workflow_runs` 的地方**（架构文档 §4.2 差异 1 —— 它不经过 `nexus-repo`）。
+   - `nexus-model` 是纯 DTO crate，**禁止**出现 `FromRow` / `sqlx::Type` / `sqlx::` 任何痕迹。
+4. 成员 crate 的依赖版本**只能**通过根 `Cargo.toml` 的 `workspace.dependencies` 引用，禁止写具体版本号。
+5. 需要跨层能力时用**消费者定义 trait**（trait 定义在使用方 crate，实现在提供方 crate），用 `impl Trait for Type` 显式打断环。禁止用 setter 反向注入。
+
+> 规则由 `bash scripts/check-deps.sh` 与 `bash scripts/check-lock.sh` 自动校验，CI 拦截。
+
+---
+
+## 3. 错误模型（三层）
+
+| 层 | 类型 | 位置 |
+|---|---|---|
+| 领域错误 | 各领域 `enum`（`thiserror`） | 领域内部 |
+| 应用错误 | `AppError` | 用例层 → 协议层 |
+| 传输错误 | `axum` 的 `IntoResponse` | 协议层 |
+
+规则：
+
+- 领域错误是 **enum，不是字符串**。新增变体时由编译器列出所有需要处理的地方。
+- 每个 `AppError` 必须能回答 `retry_policy() -> RetryPolicy`：
+  - `Retryable` —— 明确失败，重试安全。
+  - `UnknownOutcome` —— **结果未知**（请求可能已到达上游并产生副作用），禁止自动重试，转人工。
+  - `Terminal` —— 明确失败，重试无意义。
+- **超时默认映射到 `UnknownOutcome`**，不能与「上游明确不可用」混为一谈。
+- **内部原因绝不外泄**：对外只序列化 `UserFacing { code, message }`；内部 `cause` 只进日志，不参与序列化（类型上就承载不了）。
+- 业务错误码用**类型化 enum**（`ErrorCode`），码段划分沿用参考实现（1 参数 / 2 认证 / 3 会话 / 4 限流 / 5 LLM / 6 RAG / 7 工具 / 8 协议 / 9 系统）。**码值是前后端契约，不得增删改号**。
+- `ErrorCode` **必须手工实现 `Serialize`**（输出数字码），不能用 derive（derive 会输出变体名，破坏前端按码段处理）。
+
+---
+
+## 4. 类型与标识符
+
+- **ID 一律类型化**：`UserId` / `SessionId` / `RunId` / `ToolId` / `TraceId` … 共 18 种，各自底层不同（`i64` / `Uuid` / `String`）。禁止裸 `i64` / `String` 传 ID。
+- ID 的 `Serialize` 约定：输出**裸值**（如 `SessionId` 输出 UUID 字符串），不是结构体 `{"value": …}`。
+- **事件用类型化 enum**，序列化为**扁平 JSON**（`type` 与其他字段同级）。
+  - `#[serde(flatten)]` **不能用于 enum 变体**（内部 tag 与 enum 级 flatten 不兼容），只能用于变体内部的 struct 字段。
+- **工作流定义冻结 + 哈希绑定**：定义经**规范化 JSON** 后计算哈希（键序无关、数组序敏感、数字最短往返）。
+- **流式回退**：首字节发出后锁定 provider，锁定点必须在 `yield` **之前**。
+
+---
+
+## 5. 取消语义
+
+- 用**类型状态**表达取消传播，禁止用 `CancellationToken` 手工管理等价语义。
+- `DetachedScope` 上**不存在** `cancel` 方法 —— 写错语义的代码**编译不过**。
+- 该主张必须由**负向测试**（`trybuild`）固化，`.stderr` 快照入库。
+
+---
+
+## 6. 并发与背压
+
+- 区分**可丢**与**必达**两条通道：增量事件可丢（显式返回 `Outcome::Discarded`），终态事件必达（有超时兜底）。禁止用「容量 N 但只允许 N-1」这类运行时约定留槽位。
+- **禁止在 `.await` 期间持有锁**（`std::sync::MutexGuard` 跨 await 是致命错误）。用 `tokio::sync::Mutex` 或缩短持锁范围。
+- `unsafe_code` 全 workspace **forbid**（`[workspace.lints.rust]`）。
+- release profile 必须保持 `panic = "unwind"` —— 工具执行的 panic 隔离依赖 `catch_unwind` / `JoinError::is_panic`，改成 `abort` 会让整个进程被 panic 带走。（依据：根 `Cargo.toml` `[profile.release]` 注释。）
+
+---
+
+## 7. 沙箱与 SQL
+
+- SQL 校验必须是 **AST 级**（`sqlparser`），不是关键词匹配。至少保证：只读、单语句、拒绝 CTE 内的写操作。
+- 不可信输入（PDF 等）解析走**独立子进程/容器**，不用 `spawn_blocking` 代替进程级隔离。
+
+---
+
+## 8. 配置
+
+- 分层配置：`base`（打包默认值）→ `file`（`configs/*.yaml`）→ `env`（`NX_` 前缀 + `__` 分隔层级路径）。
+- 环境变量覆盖由**声明式映射表**驱动，禁止 `set_var` 逐个覆盖。
+
+---
+
+## 9. 验证要求
+
+每个新代码必须至少落在以下一层：
+
+| 层次 | 手段 | 用途 |
+|---|---|---|
+| 类型层 | `trybuild` 负向测试 | 断言「写错的代码编译不过」 |
+| 结构层 | 架构测试 / 依赖方向校验 | 依赖方向、无环、`sqlx` 收敛 |
+| 行为层 | 集成 / 不变量测试 | 语义不变量（如 fencing 拒绝僵尸写入） |
+
+- 交付前跑通：`scripts/check-lock.sh`、`scripts/check-deps.sh`、`cargo fmt --all --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings`、`cargo test --workspace --locked`。
+- `examples/` 是**独立 workspace**（有自己的 lockfile），不参与主 workspace 的 clippy 与架构测试扫描；demo 的形状搬进正式 crate 时，demo 保留作为回归基准。
+
+---
+
+## 10. 风格
+
+- edition 2024，rustfmt 默认配置，clippy 零告警（`-D warnings`）。
+- 注释用中文解释「为什么」，不解释「做了什么」。
+- 不做过早抽象：相似三行好过错误的一个抽象。
+- 公开类型应有 `Debug`（workspace lint `missing_debug_implementations`）；未完成实现必须显式 `todo!` 标记（workspace lint `todo`）。

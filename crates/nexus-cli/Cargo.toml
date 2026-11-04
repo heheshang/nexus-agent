@@ -1,0 +1,26 @@
+[package]
+name = "nexus-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "nexus"
+path = "src/main.rs"
+
+[dependencies]
+nexus-core.workspace = true
+nexus-config.workspace = true
+nexus-observability.workspace = true
+nexus-service.workspace = true
+nexus-api.workspace = true
+
+anyhow.workspace = true
+clap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

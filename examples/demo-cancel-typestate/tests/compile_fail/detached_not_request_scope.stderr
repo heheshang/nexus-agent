@@ -1,0 +1,13 @@
+error[E0308]: mismatched types
+  --> tests/compile_fail/detached_not_request_scope.rs:20:25
+   |
+20 |     takes_request_scope(detached);
+   |     ------------------- ^^^^^^^^ expected `RequestScope`, found `DetachedScope`
+   |     |
+   |     arguments to this function are incorrect
+   |
+note: function defined here
+  --> tests/compile_fail/detached_not_request_scope.rs:12:4
+   |
+12 | fn takes_request_scope(scope: RequestScope) {
+   |    ^^^^^^^^^^^^^^^^^^^ -------------------

@@ -1,0 +1,38 @@
+[package]
+name = "nexus-service"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+nexus-core.workspace = true
+nexus-config.workspace = true
+nexus-model.workspace = true
+nexus-observability.workspace = true
+nexus-infra.workspace = true
+nexus-security.workspace = true
+nexus-llm.workspace = true
+nexus-tool.workspace = true
+nexus-rag.workspace = true
+nexus-memory.workspace = true
+nexus-capacity.workspace = true
+nexus-workflow.workspace = true
+nexus-execution.workspace = true
+nexus-repo.workspace = true
+nexus-agent.workspace = true
+nexus-ingestion.workspace = true
+nexus-mcp.workspace = true
+nexus-a2a.workspace = true
+
+serde_json.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+tokio-util.workspace = true
+futures.workspace = true
+[lints]
+workspace = true
+

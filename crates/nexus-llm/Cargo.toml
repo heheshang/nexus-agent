@@ -1,0 +1,32 @@
+[package]
+name = "nexus-llm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+nexus-core.workspace = true
+nexus-config.workspace = true
+nexus-model.workspace = true
+nexus-observability.workspace = true
+nexus-security.workspace = true
+
+reqwest.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+futures.workspace = true
+bytes.workspace = true
+eventsource-stream.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+secrecy.workspace = true
+base64.workspace = true
+url.workspace = true
+chrono.workspace = true
+[lints]
+workspace = true
+

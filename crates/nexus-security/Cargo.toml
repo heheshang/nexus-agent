@@ -1,0 +1,27 @@
+[package]
+name = "nexus-security"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+nexus-core.workspace = true
+nexus-config.workspace = true
+nexus-observability.workspace = true
+
+aes-gcm.workspace = true
+sha2.workspace = true
+hkdf.workspace = true
+hmac.workspace = true
+jsonwebtoken.workspace = true
+rand.workspace = true
+secrecy.workspace = true
+zeroize.workspace = true
+regex.workspace = true
+hex.workspace = true
+tracing.workspace = true
+[lints]
+workspace = true
+
