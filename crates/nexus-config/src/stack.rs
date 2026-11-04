@@ -275,7 +275,7 @@ mod tests {
     }
 
     #[test]
-    fn origin_报告值的来源层() {
+    fn origin_reports_value_source_layer() {
         let mut stack = ConfigStack::new();
         stack.set_base(json!({"log": {"level": "info"}}));
         stack.set_file(json!({"log": {"level": "debug"}}));
@@ -285,7 +285,7 @@ mod tests {
     }
 
     #[test]
-    fn env_层优先级高于_file() {
+    fn env_layer_overrides_file_layer() {
         let mut stack = ConfigStack::new();
         stack.set_file(json!({"a": 1}));
         stack.set_env(json!({"a": 2}));

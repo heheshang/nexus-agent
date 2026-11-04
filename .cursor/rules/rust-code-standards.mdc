@@ -146,4 +146,6 @@ alwaysApply: false
 
 **测试函数名同样适用**：测试名用英文描述**断言的行为**（如 `rejects_write_operations`），中文说明放在测试体上方的注释里。
 
-由 `bash scripts/check-naming.sh` 自动校验，CI 拦截。
+**常见误判**：不要写成「英文前缀 + 中文描述」（如 `sqlx_只出现在数据访问层`）。这类写法在工具链里与纯中文名同样难检索，且部分正则检查只覆盖「中文开头」的形式而漏检它。命名一律用纯 ASCII。
+
+由 `bash scripts/check-naming.sh` 自动校验，CI 拦截。该脚本的正则同时覆盖「中文开头」与「英文前缀 + 中文在后」两种位置。

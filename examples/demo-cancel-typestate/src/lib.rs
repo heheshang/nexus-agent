@@ -116,7 +116,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn persist_是_不可取消作用域_唯一_的出口() {
+    async fn persist_is_the_only_exit_of_non_cancellable_scope() {
         let writer = Writer::default();
         let w = &writer;
         RequestScope::new(|| {})

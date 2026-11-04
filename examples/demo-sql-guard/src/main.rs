@@ -249,7 +249,7 @@ mod tests {
     }
 
     #[test]
-    fn ast_校验不保证语义合理() {
+    fn ast_validation_does_not_ensure_semantic_correctness() {
         // ⚠️ 重要边界：`SELECT FROM WHERE` 在 PostgreSQL 语法上是**合法**的
         //    （「从名为 WHERE 的表里选空列表」），sqlparser 能解析。
         //

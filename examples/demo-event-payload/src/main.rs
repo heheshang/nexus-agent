@@ -443,7 +443,7 @@ mod tests {
     }
 
     #[test]
-    fn agent_event_的子类型用_kind_而非第二个_type() {
+    fn agent_event_subtypes_use_kind_not_second_type() {
         // 参考实现用第二个 "type" 字段，本设计改名 kind 避免混淆
         let v = serde_json::to_value(EventPayload::AgentEvent {
             kind: AgentEventKind::Delegate,

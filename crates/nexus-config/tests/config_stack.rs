@@ -49,7 +49,7 @@ fn three_layer_priority_env_over_file_over_base() {
 }
 
 #[test]
-fn env_只覆盖叶子不覆盖整棵子树() {
+fn env_overrides_leaves_not_whole_subtree() {
     let env = MapEnv::new().with("LLM__DEEPSEEK__BASE_URL", "http://env");
 
     let stack = full_stack(&env);

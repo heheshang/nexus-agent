@@ -217,7 +217,7 @@ mod tests {
     }
 
     #[test]
-    fn null_值被丢弃() {
+    fn null_values_are_discarded() {
         let a = obj(&[("x", Value::from(1)), ("y", Value::Null)]);
         let b = obj(&[("x", Value::from(1))]);
         assert_eq!(canonicalize(&a).unwrap(), canonicalize(&b).unwrap());

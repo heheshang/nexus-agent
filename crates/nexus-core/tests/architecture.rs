@@ -5,12 +5,12 @@
 //!
 //! | 测试 | 检验的设计条款 |
 //! |---|---|
-//! | `nexus_core_不依赖任何内部_crate` | §4.4 规则 2 |
-//! | `能力层不反向依赖_service_api_cli` | §4.4 规则 1 |
-//! | `依赖图无环` | §4.1.2 |
-//! | `sqlx_只出现在数据访问层` | §4.4 规则 3 |
-//! | `nexus_model_不含数据库痕迹` | §4.2 差异 2 |
-//! | `能力层不依赖_nexus_repo` | §4.1.2（防环） |
+//! | `nexus_core_depends_on_no_internal_crate` | §4.4 规则 2 |
+//! | `capability_layer_does_not_depend_on_service_api_cli` | §4.4 规则 1 |
+//! | `dependency_graph_is_acyclic` | §4.1.2 |
+//! | `sqlx_appears_only_in_data_access_layers` | §4.4 规则 3 |
+//! | `nexus_model_has_no_database_traces` | §4.2 差异 2 |
+//! | `capability_layer_does_not_depend_on_nexus_repo` | §4.1.2（防环） |
 //!
 //! 设计文档 §5.2 还要求一类**负向测试**（用 `trybuild` 断言某段代码不能编译），
 //! 用于验证「取消语义靠类型保证」。那部分属于 P1（`nexus-core` 类型落地后）。
@@ -87,7 +87,7 @@ fn all_crates() -> Vec<String> {
 }
 
 #[test]
-fn nexus_core_不依赖任何内部_crate() {
+fn nexus_core_depends_on_no_internal_crate() {
     // 设计文档 §4.4 规则 2：nexus-core 是依赖图的根
     assert!(
         internal_deps("nexus-core").is_empty(),
@@ -197,7 +197,7 @@ fn dependency_graph_is_acyclic() {
 }
 
 #[test]
-fn sqlx_只出现在数据访问层() {
+fn sqlx_appears_only_in_data_access_layers() {
     // 设计文档 §4.4 规则 3
     let allowed = ["nexus-infra", "nexus-repo", "nexus-execution"];
     for crate_name in all_crates() {
@@ -215,7 +215,7 @@ fn sqlx_只出现在数据访问层() {
 }
 
 #[test]
-fn nexus_model_不含数据库痕迹() {
+fn nexus_model_has_no_database_traces() {
     // 设计文档 §4.2 差异 2：nexus-model 只放纯 DTO，
     // 不带 FromRow / sqlx::Type —— 领域概念与数据库列布局分离。
     const FORBIDDEN: &[&str] = &["FromRow", "sqlx::", "Type> for", "sqlx_macros"];
@@ -232,7 +232,7 @@ fn nexus_model_不含数据库痕迹() {
     for file in walk_rs(&src_dir) {
         let content = std::fs::read_to_string(&file).expect("读取源文件失败");
         for pat in FORBIDDEN {
-            if content.contains(pat) {
+            if strip_comments(&content).contains(pat) {
                 violations.push(format!("{} 含数据库痕迹：{pat}", file.display()));
             }
         }
@@ -242,6 +242,73 @@ fn nexus_model_不含数据库痕迹() {
         "nexus-model 必须保持纯 DTO：\n{}",
         violations.join("\n")
     );
+}
+
+/// 剥掉 Rust 源码里的**注释**，只留下真正的代码。
+///
+/// # 为什么需要
+///
+/// 「文档注释里提到 `FromRow`」是**说明性文字**（比如
+/// 「本 crate 不含 `FromRow`」），**不是**数据库痕迹。
+/// 早先的版本直接扫全文，会把这些说明文字判成违规 ——
+/// 那意味着**写清楚边界反而会让门禁红**。
+///
+/// 剥离规则（够用即可，不追求完整的词法分析）：
+/// - 行注释 `// ...`（含 `///` 与 `//!`）
+/// - 块注释 `/* ... */`
+///
+/// 字符串字面量里的 `//` 会被误剥离 —— 那会让扫描**更宽松**
+/// （漏报），不会造成误报。对「禁止出现某关键词」的检查来说，
+/// 偏宽松是可以接受的：真正的保证来自依赖层（`nexus-model` 不依赖 sqlx）。
+fn strip_comments(source: &str) -> String {
+    let mut out = String::with_capacity(source.len());
+    let mut chars = source.chars().peekable();
+    let mut in_block_comment = false;
+    let mut in_string = false;
+
+    while let Some(c) = chars.next() {
+        if in_block_comment {
+            if c == '*' && chars.peek() == Some(&'/') {
+                chars.next();
+                in_block_comment = false;
+            }
+            continue;
+        }
+        if in_string {
+            out.push(c);
+            if c == '\\' {
+                if let Some(next) = chars.next() {
+                    out.push(next);
+                }
+                continue;
+            }
+            if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '/' if chars.peek() == Some(&'/') => {
+                // 行注释：跳过到行尾。
+                for next in chars.by_ref() {
+                    if next == '\n' {
+                        out.push('\n');
+                        break;
+                    }
+                }
+            }
+            '/' if chars.peek() == Some(&'*') => {
+                chars.next();
+                in_block_comment = true;
+            }
+            '"' => {
+                in_string = true;
+                out.push(c);
+            }
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 #[test]
@@ -274,7 +341,7 @@ fn all_crates_must_not_hardcode_dependency_versions() {
 }
 
 #[test]
-fn workspace_锁定文件存在且同步() {
+fn workspace_lockfile_exists_and_is_in_sync() {
     let root = workspace_root();
     let lock = root.join("Cargo.lock");
     assert!(lock.exists(), "Cargo.lock 必须入库");
@@ -319,4 +386,27 @@ fn walk_rs(dir: &Path) -> Vec<PathBuf> {
         }
     }
     out
+}
+
+#[test]
+fn strip_comments_removes_doc_comments_but_keeps_code() {
+    // 文档注释里的 `FromRow` 是说明文字，不是数据库痕迹。
+    let source = r#"
+//! 本 crate 不含 FromRow。
+use serde::Serialize;
+/// 行注释里的 sqlx:: 也要剥掉。
+/* 块注释里的 FromRow 同样剥掉。 */
+pub struct Foo;
+"#;
+    let stripped = strip_comments(source);
+    assert!(
+        !stripped.contains("FromRow"),
+        "文档注释未被剥离：{stripped}"
+    );
+    assert!(!stripped.contains("sqlx::"), "行注释未被剥离：{stripped}");
+    assert!(
+        stripped.contains("use serde::Serialize;"),
+        "代码被误剥离：{stripped}"
+    );
+    assert!(stripped.contains("pub struct Foo;"));
 }

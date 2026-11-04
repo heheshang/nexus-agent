@@ -21,8 +21,14 @@ fail=0
 
 # Rust：函数定义 `fn <name>`（覆盖 async / unsafe / const / extern 前缀）
 # TS/JS：函数定义 `function <name>` 与箭头函数 `const <name> = ...`
-RUST_RE='(?:async[[:space:]]+|unsafe[[:space:]]+|const[[:space:]]+|extern[[:space:]]+"[^"]*"[[:space:]]+)*fn[[:space:]]+\p{Han}'
-TS_RE='(?:function[[:space:]]+|const[[:space:]]+)(?:\p{Han}[\p{L}\p{N}_$]*|[\p{L}\p{N}_$]*\p{Han}[\p{L}\p{N}_$]*)[[:space:]]*(?:=|\()'
+#
+# 标识符的正则必须**同时**覆盖两种位置：
+#   - 中文开头：`fn 校验_名称()`
+#   - 中文在后：`fn ast_校验不保证语义合理()`
+# 早期版本只匹配「中文开头」，导致 `sqlx_只出现在数据访问层` 这类
+# 「英文前缀 + 中文描述」的写法长期漏检。
+RUST_RE='(?:async[[:space:]]+|unsafe[[:space:]]+|const[[:space:]]+|extern[[:space:]]+"[^"]*"[[:space:]]+)*fn[[:space:]]+[^\s(<]*(?:\p{Han}[^\s(<]*)?[^\s(<]*\p{Han}[^\s(<]*'
+TS_RE='(?:function[[:space:]]+|const[[:space:]]+|let[[:space:]]+|var[[:space:]]+|class[[:space:]]+)(?:\p{Han}[\p{L}\p{N}_$]*|[\p{L}\p{N}_$]*\p{Han}[\p{L}\p{N}_$]*)[[:space:]]*(?:=|\(|extends|implements|\{)'
 
 echo "── 规则 1：Rust 函数名不得含中文 ──"
 hits=$(rg -n --pcre2 "$RUST_RE" \
