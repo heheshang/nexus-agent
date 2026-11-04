@@ -2422,12 +2422,15 @@ dependencies = [
  "nexus-observability",
  "nexus-security",
  "reqwest 0.13.5",
+ "rust_decimal",
  "secrecy",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-util",
  "tracing",
+ "trybuild",
  "url",
 ]
 
@@ -5350,6 +5353,7 @@ checksum = "a0181c14ddd6c7b8b0b0132a5f1ea2f32be0d893cd3ea97b6e3b28886b8a3d1c"
 dependencies = [
  "cfg-if",
  "rustversion",
+ "serde",
  "wasm-bindgen-macro",
  "wasm-bindgen-shared",
 ]

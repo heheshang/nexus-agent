@@ -111,6 +111,11 @@ prometheus = "0.14.0"
 # ---- 错误 ----
 thiserror = "2.0.21"
 anyhow = "1.0.104"
+# 精确十进制 —— 模型单价与成本是**要累加并对账**的数字，
+# 浮点的 15 位有效数字不足以保证精度。
+# 序列化用 `serde-with-str` —— 输出十进制**字符串**，
+# 与 `nexus-core` 的 `usage` 事件负载形状一致（架构文档 §2.2.4.1）。
+rust_decimal = { version = "1.43.0", features = ["serde-with-str"] }
 
 # ---- 安全 ----
 aes-gcm = { version = "0.11.1", features = ["aes", "alloc", "getrandom"] }

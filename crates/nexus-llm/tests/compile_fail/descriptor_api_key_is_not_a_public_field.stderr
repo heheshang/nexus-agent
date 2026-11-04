@@ -1,0 +1,5 @@
+error[E0616]: field `api_key` of struct `ModelDescriptor` is private
+  --> tests/compile_fail/descriptor_api_key_is_not_a_public_field.rs:25:24
+   |
+25 |     let _leaked = desc.api_key;
+   |                        ^^^^^^^ private field
