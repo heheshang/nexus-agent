@@ -95,3 +95,46 @@ fn request_scope_cannot_persist() {
     let t = trybuild::TestCases::new();
     t.compile_fail("tests/compile_fail/request_scope_cannot_persist.rs");
 }
+
+/// §2.2.3 —— `EventSink` **不可 `Clone`**，物理上杜绝多写者。
+///
+/// 克隆写入器等于凭空造出第二个写者，序号不再与写入顺序一致。
+///
+/// 期望的错误：
+/// ```text
+/// error[E0599]: no method named `clone` found for struct `EventSink` in the current scope
+/// ```
+#[test]
+fn event_sink_cannot_be_cloned() {
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/compile_fail/event_sink_cannot_be_cloned.rs");
+}
+
+/// §2.2.4 —— 事件负载的字段名写错 → **编译错误**。
+///
+/// 参考实现用 `map[string]any`，字段名写错不报错，只在前端变成 `undefined`。
+///
+/// 期望的错误：
+/// ```text
+/// error[E0559]: variant `EventPayload::ToolResult` has no field named `ms`
+/// ```
+#[test]
+fn event_payload_field_name_typo_is_compile_error() {
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/compile_fail/event_payload_field_name_typo.rs");
+}
+
+/// §2.2.3 —— `emit` 取 `&mut self`，写入需要**独占借用**。
+///
+/// 独占借用意味着不可能同时持有两个对写入器的可变借用，
+/// 序号与写入顺序天然一致。
+///
+/// 期望的错误：
+/// ```text
+/// error[E0499]: cannot borrow `sink` as mutable more than once at a time
+/// ```
+#[test]
+fn event_sink_requires_mutable_borrow() {
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/compile_fail/event_sink_requires_mutable_borrow.rs");
+}

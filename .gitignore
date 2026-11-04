@@ -14,3 +14,8 @@ configs/secrets.yaml
 .vscode/
 *.swp
 .DS_Store
+
+# 其他
+*.log
+*.log.*
+*.stderr

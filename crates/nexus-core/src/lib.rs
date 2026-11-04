@@ -16,18 +16,24 @@
 //! |---|---|---|
 //! | [`id`] | 类型化 ID（18 种） | 架构文档 §2.8.1 |
 //! | [`cancel`] | 取消语义类型状态 | 架构文档 §2.1 |
+//! | [`event`] | 事件负载（12 种）+ 单写者事件流 | 架构文档 §2.2 |
 //!
-//! 后续模块（事件、错误）见架构文档 §2.2 / §2.6。
+//! 后续模块（错误）见架构文档 §2.6。
 //!
 //! # 依赖位置
 //!
 //! 本 crate 是**依赖图的根**（架构文档 §4.4 规则 2：零内部依赖）。
-//! 它的依赖只有外部 crate —— `serde` / `uuid` / `thiserror` / `tokio-util`。
+//! 它的依赖只有外部 crate —— `serde` / `uuid` / `thiserror` / `tokio-util` / `futures`。
 
 pub mod cancel;
+pub mod event;
 pub mod id;
 
 pub use cancel::{DetachedScope, PersistError, RequestScope};
+pub use event::{
+    AgentEventKind, EVENT_NAMES, Event, EventChannel, EventPayload, EventSink, EventStream,
+    EventStreamError, FinishReason, ToolStatus,
+};
 pub use id::{
     AgentId, CaseId, DatasetId, DocumentId, EmbeddingConfigId, ID_TYPE_NAMES, InterruptId, KbId,
     MessageId, ModelConfigId, ProviderId, RunId, SessionId, ToolCallId, ToolId, TraceId, UserId,
