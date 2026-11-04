@@ -1,7 +1,7 @@
 ---
 id: NEX-8
 title: "feat(infra): 落地 PG 连接池与配置装配"
-status: To Do
+status: Done
 assignee: []
 labels: [infra, postgres, p2]
 priority: high
