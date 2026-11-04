@@ -17,10 +17,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 安装 Rust 工具链
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+      # 工具链版本由仓库根的 rust-toolchain.toml 唯一决定 —— 不在这里覆盖。
+      #
+      # 为什么重要：`trybuild` 的 `.stderr` 快照是**编译器实际输出**的逐字记录，
+      # 编译器版本一变，11 个负向快照全部失效。版本漂移会变成「与本次改动无关」
+      # 的 CI 红灯。rustup 会自动安装 rust-toolchain.toml 指定的版本及其
+      # components（rustfmt / clippy）。
+      - name: 显示工具链版本
+        run: rustc --version && cargo fmt --version && cargo clippy --version
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -54,7 +58,7 @@ jobs:
     needs: check
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # 工具链版本由 rust-toolchain.toml 决定（见 check 作业的说明）。
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: . -> target

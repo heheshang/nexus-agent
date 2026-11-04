@@ -1397,14 +1397,14 @@ nexus-repo 实现：impl ChunkStore for PgChunkRepo { ... }   ← 实现在数�
 
 ## 4.3 目标态 vs 当前实现
 
-本节诚实记录设计目标与当前 workspace 的差距。**P0 已完成，P1 起逐步收敛。**
+本节诚实记录设计目标与当前 workspace 的差距。**P0 已完成，P1 已完成。**
 
 | 项 | 设计目标 | 当前实现 | 状态 |
 |---|---|---|---|
 | `nexus-repo` ↔ `nexus-rag` | 单向 `repo → rag` | 已单向（`repo` 依赖 `rag`） | ✅ |
 | `nexus-execution` → `nexus-repo` | 不依赖 | 不依赖 | ✅ |
 | `nexus-model` 纯净 | 无数据库痕迹 | 无 | ✅ |
-| `nexus-core` 子模块 | 类型状态、事件、错误 | **空**（待 P1） | ⬜ |
+| `nexus-core` 子模块 | 类型状态、事件、错误 | 类型化 ID（18）+ 取消语义 + 事件（12）+ 业务码（42） | ✅ |
 | `nexus-mcp` / `nexus-a2a` 位置 | 见 §4.3.1（已定稿） | 能力层（不依赖 `service`） | ✅ |
 | `nexus-vector` | 能力层（抽象 + 实现），见 §4.3.3 | 独立 crate | ✅ |
 | `nexus-service` → `nexus-execution` | 见 §4.3.2（已定稿） | 依赖 | ✅ |
@@ -1629,19 +1629,50 @@ Rust 的测试可以验证「某段代码**不能**编译」：
 > ```
 >
 > `.stderr` 快照已提交，因此**编译器行为变化会立刻让测试失败**。
-> P1 直接把这个 demo 的形状搬进 `nexus-core`。
+>
+> **落地记录（2026-11-04，P1 完成）**：这个 demo 的形状已搬进 `nexus-core` ——
+> `crates/nexus-core/tests/compile_fail.rs` 现在用 `trybuild` 断言 **11 个**负向样例，
+> 覆盖三处设计条款：
+>
+> | 条款 | 用例 | 错误码 |
+> |---|---|---|
+> | §2.1.3 取消语义 | `detached_cannot_cancel` | E0599 |
+> | §2.1.3 类型不可互换 | `detached_not_request_scope` | E0308 |
+> | §2.1.3 无取消逃生口 | `detached_no_token_escape_hatch` | E0599 |
+> | §2.1.3 规则 A | `detached_not_constructible_directly` | E0451 |
+> | §2.1.3 规则 B | `request_scope_cannot_persist` | E0599 |
+> | §2.2.3 单写者 | `event_sink_cannot_be_cloned` | E0599 |
+> | §2.2.3 独占借用 | `event_sink_requires_mutable_borrow` | E0499 |
+> | §2.2.4 字段名不可写错 | `event_payload_field_name_typo` | E0559 |
+> | §2.6.5 内部原因不外泄 | `app_error_is_not_serializable` | E0277 |
+> | §2.6.5 类型上无法携带 cause | `user_facing_cannot_carry_cause` | E0560 |
+> | 框架自检 | `framework_selfcheck` | E0308 |
+>
+> `examples/` 下的 demo **全部保留** —— 它们是设计验证的**回归基准**，
+> 不是临时代码。demo 与 `nexus-core` 的实现是**两份独立的验证**：
+> demo 证明设计可行，`nexus-core` 是生产实现。
+>
+> ⚠️ **注意 demo 的形状不能直接搬**：demo 用 `Arc<dyn Fn()>` 回调模拟取消，
+> 而 §2.1.5 定稿的是 `tokio_util::sync::CancellationToken` ——
+> 且 `new()`（不随父取消）与 `child_token()`（随父取消）**方向相反**。
 
 ## 5.3 结构层的检验：架构测试
 
-当前 workspace 已有 8 个架构测试（依赖方向、无环、sqlx 收敛、锁纪律）。设计文档落地后需补充：
+当前 workspace 已有 **10 个**架构测试（依赖方向、无环、sqlx 收敛、锁纪律、依赖版本纪律、lints 继承、入口文件）。设计文档落地后需补充：
 
-| 测试 | 检验的设计条款 |
-|---|---|
-| `workflow_runs` 只在 `nexus-execution` 出现 | §4.2 差异 1 |
-| `nexus-model` 不含 `FromRow` / `sqlx::Type` | §4.2 差异 2 |
-| `nexus-core` 零内部依赖 | §4.4 规则 2 |
-| 能力层不依赖 `nexus-repo` | §4.1.2（防环） |
-| `nexus-repo` 只依赖能力层（单向） | §4.1.2 |
+| 测试 | 检验的设计条款 | 状态 |
+|---|---|---|
+| `workflow_runs` 只在 `nexus-execution` 出现 | §4.2 差异 1 | ⬜ P2 才有 `workflow_runs` |
+| `nexus-model` 不含 `FromRow` / `sqlx::Type` | §4.2 差异 2 | ✅ 已有 |
+| `nexus-core` 零内部依赖 | §4.4 规则 2 | ✅ 已有 |
+| 能力层不依赖 `nexus-repo` | §4.1.2（防环） | ✅ 已有 |
+| `nexus-repo` 只依赖能力层（单向） | §4.1.2 | ⬜ P2 才有 |
+
+> **落地记录（2026-11-04，P1 完成）**：本表的后两项属于 **P2** ——
+> `workflow_runs` 的写入者与 `nexus-repo` 的依赖面都要等 P2 的
+> `nexus-infra` / `nexus-repo` 落地后才存在实体可查。
+> P1 期间 `nexus-core` 加了 `tokio-util` / `futures` 依赖，
+> 已确认**零内部依赖**规则仍然成立（外部 crate 不算内部依赖）。
 
 ## 5.4 行为层的检验：不变量测试
 
@@ -1652,12 +1683,15 @@ Rust 的测试可以验证「某段代码**不能**编译」：
 | 无 Redis 时系统仍工作 | 停掉 Redis，断言任务仍被领取 | ✅ 已验证 |
 | `generation` fencing 拒绝僵尸写入 | 并发领取同一 run，断言旧持有者写入影响 0 行 | ✅ 已验证 |
 | `SKIP LOCKED` 不互相阻塞 | 3 个并发连接各领不同 run | ✅ 已验证 |
-| `DetachedScope` 无法被取消 | `trybuild` 负向测试 | ✅ 已验证（`demo-cancel-typestate`） |
+| `DetachedScope` 无法被取消 | `trybuild` 负向测试 | ✅ 已验证（`demo-cancel-typestate` + `nexus-core` 11 个负向用例） |
 | 终态事件必达 / 增量可丢 | 双通道：填满增量通道后终态仍送达 | ✅ 已验证（`demo-backpressure`） |
 | 流式开始后不可回退 | 发出首字节后调 `fallback()`，断言报错 | ✅ 已验证（`demo-stream-fallback`） |
 | 定义哈希稳定 | 规范化性质测试（键序无关） | ✅ 已验证（`demo-canonical-json`） |
-| 错误码不泄露内部原因 | 序列化 `UserFacing`，断言不含 cause | ✅ 已验证（`demo-error-model`） |
-| 事件负载扁平化 | 断言 `type` 与其他字段同级 | ✅ 已验证（`demo-event-payload`） |
+| 错误码不泄露内部原因 | 序列化 `UserFacing`，断言不含 cause | ✅ 已验证（`demo-error-model` + `nexus-core` 负向用例） |
+| 事件负载扁平化 | 断言 `type` 与其他字段同级 | ✅ 已验证（`demo-event-payload` + `nexus-core` 契约测试） |
+| 业务码值与分类不漂移 | 契约测试对照 §2.6.4.1 表逐条断言 | ✅ 已验证（`nexus-core` 契约测试，变异测试验证过有效性） |
+| ID 类型互不相同 | `TypeId` 去重后仍为 18 | ✅ 已验证（`nexus-core` 契约测试） |
+| 事件名清单不增不减 | 序列化后 `type` 字段比对 §2.2.4.1 表 | ✅ 已验证（`nexus-core` 契约测试） |
 | `nexus-model` 无数据库痕迹 | 源码扫描禁止 `FromRow` / `sqlx::` | ✅ 已验证 |
 | SQL 只读守卫 | AST 解析拒绝写操作 / 多语句 / CTE 写 | ✅ 已验证（`demo-sql-guard`） |
 | 消费者定义 trait 不产生环 | `repo → rag` 单向依赖 | ✅ 已验证（`demo-consumer-trait`） |
@@ -1686,6 +1720,23 @@ examples/
 ├── demo-stream-fallback/    # §3.3 流式不可回退
 └── demo-lease-fencing/      # §2.5.4 SKIP LOCKED + generation fencing（需 PG）
 ```
+
+> **落地记录（2026-11-04，P1 完成）**：这 **11 个 demo 全部保留** ——
+> 它们是设计验证的**回归基准**，不是临时代码。
+>
+> demo 与生产实现是**两份独立的验证**，各有分工：
+>
+> | | demo（`examples/`） | 生产实现（`crates/`） |
+> |---|---|---|
+> | 作用 | 证明设计**可行** | 交付**可用**的类型 |
+> | 依赖 | 可用与生产不同的依赖组合 | 受 workspace 纪律约束 |
+> | 生命周期 | **永久保留** | 随 P1–P9 演进 |
+>
+> `demo-cancel-typestate` / `demo-event-payload` / `demo-error-model`
+> 三个 demo 的设计主张已在 `nexus-core` 中落地并由 **11 个 `trybuild` 负向用例**
+> + **9 个跨模块契约测试**固化（见 §5.2）。
+> 但 demo **不删** —— 它们验证的是「设计本身成立」，
+> 生产实现的测试验证的是「这份代码没退化」，两者不能互相替代。
 
 **为什么独立 workspace**：demo 有意使用与生产代码不同的依赖组合（例如 `rmcp` 需开
 `transport-streamable-http-server` 等 feature，而主 workspace 只开了子集）。
@@ -1741,18 +1792,18 @@ cd <nexus-agent>/examples && cargo run -p demo-lease-fencing
 
 ## 6.1 阶段划分
 
-| 阶段 | 内容 | 完成判据 |
-|---|---|---|
-| **P0 骨架** | workspace、crate 边界、CI、架构测试 | 依赖方向违规能自动拦截 |
-| **P1 核心类型** | `nexus-core` 的类型：取消语义、事件、错误 | 负向测试通过 |
-| **P2 基础设施** | `nexus-infra`（PG/Redis/S3/Milvus）、`nexus-repo` | 迁移可应用、集成测试绿 |
-| **P3 LLM 网关** | `nexus-llm`：供应商、预算、重试、熔断 | 预算裁剪与回退边界有测试 |
-| **P4 Agent 运行时** | `nexus-agent`：ReAct、上下文预算 | ReAct 循环有测试 |
-| **P5 协议层** | `nexus-api`：REST + SSE | SSE 半帧处理有测试 |
-| **P6 工作流** | `nexus-workflow` + `nexus-execution` | 租约、fencing、审批恢复有测试 |
-| **P7 知识与记忆** | `nexus-rag`、`nexus-memory` | 混合检索降级路径有测试 |
-| **P8 工具与协议** | `nexus-tool`、`nexus-mcp`（出站）、`nexus-a2a`（双向） | 危险工具授权边界有测试 |
-| **P9 集成与容量** | 端到端、压测、观测 | §5.6 指标有基线 |
+| 阶段 | 内容 | 完成判据 | 状态 |
+|---|---|---|---|
+| **P0 骨架** | workspace、crate 边界、CI、架构测试 | 依赖方向违规能自动拦截 | ✅ 完成 |
+| **P1 核心类型** | `nexus-core` 的类型：取消语义、事件、错误 | 负向测试通过 | ✅ 完成（11 个负向用例 + 9 个跨模块契约测试） |
+| **P2 基础设施** | `nexus-infra`（PG/Redis/S3/Milvus）、`nexus-repo` | 迁移可应用、集成测试绿 | ⬜ |
+| **P3 LLM 网关** | `nexus-llm`：供应商、预算、重试、熔断 | 预算裁剪与回退边界有测试 | ⬜ |
+| **P4 Agent 运行时** | `nexus-agent`：ReAct、上下文预算 | ReAct 循环有测试 | ⬜ |
+| **P5 协议层** | `nexus-api`：REST + SSE | SSE 半帧处理有测试 | ⬜ |
+| **P6 工作流** | `nexus-workflow` + `nexus-execution` | 租约、fencing、审批恢复有测试 | ⬜ |
+| **P7 知识与记忆** | `nexus-rag`、`nexus-memory` | 混合检索降级路径有测试 | ⬜ |
+| **P8 工具与协议** | `nexus-tool`、`nexus-mcp`（出站）、`nexus-a2a`（双向） | 危险工具授权边界有测试 | ⬜ |
+| **P9 集成与容量** | 端到端、压测、观测 | §5.6 指标有基线 | ⬜ |
 
 ## 6.2 P0 的具体任务
 
@@ -1762,6 +1813,19 @@ cd <nexus-agent>/examples && cargo run -p demo-lease-fencing
 | crate 边界测试 | 依赖方向、无环、sqlx 收敛 |
 | 负向测试框架 | `trybuild` 接入，验证 §2.1.3 |
 | 配置骨架 | 分层配置 + `NX_` 环境变量映射表 |
+
+## 6.2.1 P1 的具体任务
+
+| 任务 | 产出 | 契约依据 |
+|---|---|---|
+| NEX-4 | 类型化 ID（18 种）+ 取消语义类型状态 | §2.1、§2.8.1 |
+| NEX-5 | 事件负载（12 种）+ 单写者事件流 | §2.2、§2.2.4.1 |
+| NEX-6 | 三层错误模型 + 42 个业务码契约 | §2.6、§2.6.4.1 |
+| NEX-7 | 收口：跨模块契约测试 + 架构文档同步 | §5.2、§5.3、§4.2 |
+
+P1 的完成判据「负向测试通过」由 NEX-4 承担、NEX-7 确认其**真的运行**
+（而非被跳过）—— `crates/nexus-core/tests/compile_fail.rs` 的 11 个用例
+在 CI 中逐个运行，无一被忽略。
 
 ## 6.3 设计定稿的门槛
 
@@ -1904,3 +1968,13 @@ cd <nexus-agent>/examples && cargo run -p demo-lease-fencing
 
 > 这些都已在 `examples/` 下有对应的**回归测试**，正式实现时直接搬过去。
 > 附录 C.1 记录了写 demo 时踩到的 **8 条**实现陷阱。
+
+**P1 落地时新增的 5 条**（正式实现的记录 —— 与 demo 的坑不同类型）：
+
+| 陷阱 | 症状 | 正确做法 |
+|---|---|---|
+| `Deserialize` 也必须手工实现 | 派生版本期望变体名 `"ModelTimeout"`，与序列化的数字形状不匹配 | `Serialize` / `Deserialize` 都手工，统一用数字码 |
+| `AppError` 实现 `Serialize` 并跳过 cause | 留了「有人改成派生 `Serialize` 就泄露」的路 | **不实现** `Serialize` —— 只有 `UserFacing` 可序列化 |
+| 依赖行写成 `name = { workspace = true, features = [...] }` | 被架构测试拦下（纪律要求只能是 `name.workspace = true`） | 需要 feature 就改 workspace 根 manifest |
+| 并列两次 `sink.emit(...)` 不触发借用错误 | 两次调用是顺序的，前一个返回值不持有借用，NLL 让第二个合法 | 要验证「独占借用」须**同时持有**两个 `&mut` 引用 |
+| 负向用例的错误码靠直觉写 | 实际是 E0559（非 E0560）、E0499（非 E0502） | 以 `.stderr` 快照为准 —— 快照记录的是编译器**实际行为** |
