@@ -13,10 +13,14 @@ thiserror.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 bytes.workspace = true
+# 取消语义：CancellationToken（架构文档 §2.1.5）
+tokio-util.workspace = true
 
 [dev-dependencies]
 # 负向测试框架：断言「写错的代码编译不过」（架构文档 §5.2）
 trybuild.workspace = true
+# 取消语义的单元测试需要异步运行时（workspace 的 tokio 已含 rt/macros/sync）
+tokio.workspace = true
 
 [lints]
 workspace = true

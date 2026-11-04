@@ -1,0 +1,5 @@
+error[E0451]: field `token` of struct `DetachedScope` is private
+  --> tests/compile_fail/detached_not_constructible_directly.rs:20:37
+   |
+20 |     let _detached = DetachedScope { token };
+   |                                     ^^^^^ private field

@@ -1,0 +1,5 @@
+error[E0599]: no method named `persist` found for struct `RequestScope` in the current scope
+  --> tests/compile_fail/request_scope_cannot_persist.rs:20:25
+   |
+20 |     let _result = scope.persist(async { Ok::<_, nexus_core::PersistError>(()) }).await;
+   |                         ^^^^^^^ method not found in `RequestScope`

@@ -1,0 +1,11 @@
+error[E0599]: no method named `cancel` found for struct `DetachedScope` in the current scope
+  --> tests/compile_fail/detached_cannot_cancel.rs:19:14
+   |
+19 |     detached.cancel();
+   |              ^^^^^^
+   |
+help: there is a method `is_cancelled` with a similar name
+   |
+19 -     detached.cancel();
+19 +     detached.is_cancelled();
+   |

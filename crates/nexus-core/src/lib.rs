@@ -10,10 +10,29 @@
 //! - ❌ 不放任何**有行为**的编排逻辑
 //! - ❌ 不做业务判断
 //!
-//! # 状态
+//! # 子模块
 //!
-//! 子模块待设计文档定稿后填充。参见
-//! `docs/architecture/2026-11-04-nexusagent-eino-rust-reference-architecture.md`。
+//! | 模块 | 内容 | 设计条款 |
+//! |---|---|---|
+//! | [`id`] | 类型化 ID（18 种） | 架构文档 §2.8.1 |
+//! | [`cancel`] | 取消语义类型状态 | 架构文档 §2.1 |
+//!
+//! 后续模块（事件、错误）见架构文档 §2.2 / §2.6。
+//!
+//! # 依赖位置
+//!
+//! 本 crate 是**依赖图的根**（架构文档 §4.4 规则 2：零内部依赖）。
+//! 它的依赖只有外部 crate —— `serde` / `uuid` / `thiserror` / `tokio-util`。
+
+pub mod cancel;
+pub mod id;
+
+pub use cancel::{DetachedScope, PersistError, RequestScope};
+pub use id::{
+    AgentId, CaseId, DatasetId, DocumentId, EmbeddingConfigId, ID_TYPE_NAMES, InterruptId, KbId,
+    MessageId, ModelConfigId, ProviderId, RunId, SessionId, ToolCallId, ToolId, TraceId, UserId,
+    VectorId, WorkflowId,
+};
 
 /// crate 版本号，便于运行时自检与日志标注。
 pub const CRATE_NAME: &str = env!("CARGO_PKG_NAME");

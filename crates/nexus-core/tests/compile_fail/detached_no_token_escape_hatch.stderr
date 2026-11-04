@@ -1,0 +1,5 @@
+error[E0599]: no method named `token` found for struct `DetachedScope` in the current scope
+  --> tests/compile_fail/detached_no_token_escape_hatch.rs:19:27
+   |
+19 |     let _token = detached.token();
+   |                           ^^^^^ private field, not a method

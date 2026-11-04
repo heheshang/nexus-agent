@@ -1,4 +1,4 @@
-//! 负向测试入口：断言「写错的代码**编译不过**」。
+//! 负向测试：断言「写错取消语义的代码**编译不过**」。
 //!
 //! 架构文档 §5.2 —— 类型层的检验。
 //!
@@ -8,18 +8,16 @@
 //! 快照入库意味着：**编译器行为变化会立刻让测试失败** —— 这是刻意的，
 //! 它保证「负向断言」不会因为工具链升级而悄悄失效。
 //!
-//! # 当前状态
-//!
-//! P1 尚未落地 `nexus-core` 的取消语义类型（`RequestScope` / `DetachedScope`），
-//! 因此这里只保留一个**框架自检**用例：它只依赖 `std`，与业务类型无关，
-//! 用来证明负向测试链路本身是通的。
-//!
-//! P1 落地后，本文件追加真正的主张：
+//! # 检验的设计条款
 //!
 //! | 用例 | 检验的设计条款 |
 //! |---|---|
-//! | `detached_cannot_cancel` | §2.1.3 规则 A —— `DetachedScope` 上不存在 `cancel()` |
-//! | `detached_not_request_scope` | §2.1.3 规则 A —— `DetachedScope` 不能当 `RequestScope` 用 |
+//! | `framework_selfcheck` | 负向测试链路本身可用 |
+//! | `detached_cannot_cancel` | §2.1.3 —— `DetachedScope` 上不存在 `cancel()` |
+//! | `detached_not_request_scope` | §2.1.3 —— `DetachedScope` 不能当 `RequestScope` 用 |
+//! | `detached_no_token_escape_hatch` | §2.1.3 —— 没有 `token()` / `subscribe()` 逃生口 |
+//! | `detached_not_constructible_directly` | §2.1.3 规则 A —— 只能通过 `detach()` 构造 |
+//! | `request_scope_cannot_persist` | §2.1.3 规则 B —— `RequestScope` 上没有落库方法 |
 //!
 //! 可参考的现成实现：`examples/demo-cancel-typestate/`。
 
@@ -29,7 +27,71 @@
 /// 存在的意义是：若哪天 `trybuild` 因依赖或配置问题静默跳过全部用例，
 /// 本用例会先失败，把问题暴露出来。
 #[test]
-fn compile_fail_framework_self_check() {
+fn framework_self_check() {
     let t = trybuild::TestCases::new();
     t.compile_fail("tests/compile_fail/framework_selfcheck.rs");
+}
+
+/// §2.1.3 —— `DetachedScope` 上不存在 `cancel()`。
+///
+/// 期望的错误：
+/// ```text
+/// error[E0599]: no method named `cancel` found for struct `DetachedScope`
+/// ```
+#[test]
+fn detached_cannot_cancel() {
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/compile_fail/detached_cannot_cancel.rs");
+}
+
+/// §2.1.3 —— `DetachedScope` 不能当 `RequestScope` 用。
+///
+/// 期望的错误：
+/// ```text
+/// error[E0308]: mismatched types
+/// ```
+#[test]
+fn detached_not_request_scope() {
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/compile_fail/detached_not_request_scope.rs");
+}
+
+/// §2.1.3 —— `DetachedScope` 上没有 `token()` / `subscribe()` 逃生口。
+///
+/// 期望的错误：
+/// ```text
+/// error[E0599]: no method named `token` found for struct `DetachedScope`
+/// ```
+#[test]
+fn detached_has_no_token_escape_hatch() {
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/compile_fail/detached_no_token_escape_hatch.rs");
+}
+
+/// §2.1.3 规则 A —— `DetachedScope` 只能通过 `detach()` 构造。
+///
+/// 字段私有，且没有公开的构造函数 —— 不允许绕过 `detach()` 直接构造。
+///
+/// 期望的错误：
+/// ```text
+/// error[E0451]: field `token` of struct `DetachedScope` is private
+/// ```
+#[test]
+fn detached_is_not_directly_constructible() {
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/compile_fail/detached_not_constructible_directly.rs");
+}
+
+/// §2.1.3 规则 B —— `RequestScope` 上**没有**落库方法。
+///
+/// 要落库必须先 `detach()`。这条断言保证「忘记 detach 的代码根本没法落库」。
+///
+/// 期望的错误：
+/// ```text
+/// error[E0599]: no method named `persist` found for struct `RequestScope`
+/// ```
+#[test]
+fn request_scope_cannot_persist() {
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/compile_fail/request_scope_cannot_persist.rs");
 }
