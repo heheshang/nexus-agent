@@ -39,15 +39,15 @@ P2 的地基：**`nexus-infra` 负责 PG / Redis / S3 / Milvus 的客户端构�
 
 ## Acceptance Criteria
 
-- [ ] #1 `nexus-infra` 有 `pg` 模块，导出 `PgPool` 的构造入口
-- [ ] #2 连接池从 `nexus-config` 的 `ConfigStack` 取配置（`database.url` / `max_connections` / `connect_timeout_secs`），**不自己读环境变量**
-- [ ] #3 `max_connections` 与 `connect_timeout_secs` 缺失时用**默认值**（10 / 5 秒），不报错
-- [ ] #4 连接 URL **绝不**出现在 `Debug` / `Display` / 日志里 —— 有测试断言
-- [ ] #5 `nexus-infra` 的 `Cargo.toml` 只依赖 `nexus-core` / `nexus-config` / `nexus-observability`（内部依赖）
-- [ ] #6 单元测试覆盖：配置缺失走默认值、配置完整走给定值
-- [ ] #7 构造连接池**不 panic** —— 连接失败返回 `Result`，不 unwrap
-- [ ] #8 `cargo test --workspace --locked` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo fmt --all --check` 通过
-- [ ] #9 CI 六道门禁全绿
+- [x] #1 `nexus-infra` 有 `pg` 模块，导出 `PgPool` 的构造入口
+- [x] #2 连接池从 `nexus-config` 的 `ConfigStack` 取配置（`database.url` / `max_connections` / `connect_timeout_secs`），**不自己读环境变量**
+- [x] #3 `max_connections` 与 `connect_timeout_secs` 缺失时用**默认值**（10 / 5 秒），不报错
+- [x] #4 连接 URL **绝不**出现在 `Debug` / `Display` / 日志里 —— 有测试断言
+- [x] #5 `nexus-infra` 的 `Cargo.toml` 只依赖 `nexus-core` / `nexus-config` / `nexus-observability`（内部依赖）
+- [x] #6 单元测试覆盖：配置缺失走默认值、配置完整走给定值
+- [x] #7 构造连接池**不 panic** —— 连接失败返回 `Result`，不 unwrap
+- [x] #8 `cargo test --workspace --locked` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo fmt --all --check` 通过
+- [x] #9 CI 六道门禁全绿
 
 ## 备注
 
@@ -61,4 +61,58 @@ P2 的地基：**`nexus-infra` 负责 PG / Redis / S3 / Milvus 的客户端构�
 
 ## 实现过程中的发现
 
-<!-- 实现时填写 -->
+**1. `sqlx 0.9` 移除了 `PgConnectOptions::connect_timeout` —— 配置项语义被迫改变。**
+原计划把 `database.connect_timeout_secs` 映射到 `PgConnectOptions::connect_timeout`。
+实测 `sqlx-postgres-0.9.0/src/options/mod.rs` —— `PgConnectOptions` 的字段里
+**没有** `connect_timeout` 了（只有 `host` / `port` / `password` / `ssl_mode` 等）。
+全 crate 搜索 `connect_timeout` 只在 `sqlx-core` 的 `PoolOptions` 里出现一次，
+且那里的 `Debug` 实现把 `acquire_timeout` **显示成** `connect_timeout` 字段名
+（`pool/options.rs:590`）—— 容易误导。
+
+**sqlx 0.9 的实际做法**：连接建立超时统一由池的 `acquire_timeout` 兜底
+（`pool/inner.rs:252` 以 `acquire_timeout` 为截止时间）。
+
+所以本实现把 `database.connect_timeout_secs` 映射到 `PoolOptions::acquire_timeout`。
+这与配置项的名字**不完全对齐** —— 但这是 sqlx 0.9 唯一可用的旋钮。
+已在代码注释里写明这个偏离，避免后人以为配错了。
+
+**2. `PgConnectOptions` 的派生 `Debug` 会**明文打印口令** —— 实测确认。**
+`PgConnectOptions` 派生 `Debug`，内部持有 `password: Option<String>`，于是：
+
+```text
+PgConnectOptions { host: "127.0.0.1", ..., password: Some("supersecret"), ... }
+```
+
+只要这个类型被 `{:?}` 打进日志，口令就泄露了。
+`secrecy::SecretString` 挡不住这个问题 —— 它保护的是**我们自己**的类型，
+而 sqlx 的类型不受我们控制。
+
+**已落地 `SafeConnectOptions` 包装**：手写 `Debug`，只输出 `host` / `port` / `database`，
+口令一律 `[REDACTED]`。
+「手写」而非「派生」是关键 —— 派生只能原样打印字段。
+
+同时把 `connect_options`（返回裸类型）标了 ⚠️ 警告，
+并让 `connect_lazy` 走安全包装 —— 裸类型**只在建连那一刻**出现。
+
+**3. `connect_lazy_with` 必须在 Tokio 上下文里调用。**
+初稿的惰性构造测试用普通 `#[test]`，结果 panic：
+「this functionality requires a Tokio context」——
+`connect_lazy_with` 会 spawn 一个后台连接维护任务
+（`sqlx-core-0.9.0/src/pool/inner.rs:533`）。
+已改成 `#[tokio::test]`，并在函数文档里写明这个前置条件。
+
+**4. `SecretBox<str>` 没有实现 `PartialEq` / `Eq`。**
+`PgSettings` 一开始派生 `PartialEq, Eq`，编译失败。
+已去掉 —— 而且**这本身是对的**：让 secret 参与相等性比较可疑
+（比较可能泄漏长度信息）。
+
+**5. 配了 `0` 是明确错误，不能悄悄退回默认值。**
+`max_connections = 0` / `connect_timeout_secs = 0` → 返回 `ErrorCode::InvalidParam`。
+**缺失**才用默认值。
+两者区别很重要：缺失是「没配」，退回默认合理；
+配了 0 是「配错了」，退回默认会让运维以为配的值生效了。
+
+**6. `serde_json` 只作为 dev-dependency 引入。**
+测试要用 `json!` 宏构造 `ConfigStack`，但 `serde_json` **不是**运行时依赖 ——
+放进 `[dependencies]` 会平白扩大依赖面。
+`nexus-infra` 的运行时依赖只增加了 `secrecy`（根 manifest 早已声明）。

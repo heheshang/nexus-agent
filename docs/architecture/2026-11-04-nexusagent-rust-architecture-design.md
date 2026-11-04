@@ -1986,3 +1986,11 @@ P1 的完成判据「负向测试通过」由 NEX-4 承担、NEX-7 确认其**�
 | 参考文档说「`sqlx::migrate!` 只支持 up 迁移」 | 沿用「down 脚本另存他处」的方案，放弃了 up/down 同版本号配对 | sqlx 0.9 **原生支持** `.up.sql` / `.down.sql`，`Migrator::undo()` 是 API 能力（`migration_type.rs:19` / `migrator.rs:314`）—— 参考实现命名可原样沿用 |
 | 迁移文件名格式错误 | **静默忽略** —— 那个迁移根本没跑，**且不报错** | 文件名必须 `<整数版本号>_<描述>.sql`；必须有测试断言「预期的表都存在」（`source.rs:207` 用 `splitn(2, '_')`，不匹配就 `continue`） |
 | 表数量「43」 | 实际是 **42 表 + 1 视图**（`execution_active_capacity` 是视图） | 用 `information_schema` 分别统计 `BASE TABLE` 与 `VIEW` —— 视图不是表 |
+
+**P2 · NEX-8 实施时新增的 3 条**（2026-11-04，实测 `sqlx 0.9.0` 源码）：
+
+| 陷阱 | 症状 | 正确做法 |
+|---|---|---|
+| `PgConnectOptions` 派生 `Debug`，**明文打印口令** | `PgConnectOptions { ..., password: Some("secret"), ... }` —— 打进日志即泄露 | 用**手写** `Debug` 的包装类型（`nexus-infra::SafeConnectOptions`），只输出 `host`/`port`/`database`，口令写 `[REDACTED]`。`secrecy` 挡不住 —— 它只保护**自己**的类型 |
+| sqlx 0.9 移除了 `PgConnectOptions::connect_timeout` | 按旧版文档写会编译失败；且 `PoolOptions` 的 `Debug` 把 `acquire_timeout` **显示成** `connect_timeout`，极易误判 | 连接建立超时统一用 `PoolOptions::acquire_timeout`（`pool/inner.rs:252` 以它为截止时间） |
+| `connect_lazy_with` 需要 Tokio 上下文 | 普通 `#[test]` 里调用 panic「this functionality requires a Tokio context」 | 用 `#[tokio::test]`；它会 spawn 后台连接维护任务（`pool/inner.rs:533`） |

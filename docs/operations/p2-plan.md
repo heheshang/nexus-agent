@@ -76,6 +76,8 @@ NEX-8 (PG 连接池 + 配置)
 | SQL 校验方式 | **`query_as` + `FromRow`**（运行期），**不用** `query!` 编译期宏 | §3.9.3 —— schema 频繁变 + `SKIP LOCKED` / `ON CONFLICT` 本来就要写原生 SQL |
 | 迁移工具 | **`sqlx::migrate!`**（可逆格式 `.up.sql` / `.down.sql`） | §3.9.3 + **实测源码** —— sqlx 0.9 原生支持可逆迁移（详见 NEX-9） |
 | 启动期健康检查 | 启动时跑一次关键表 smoke check | §3.9.3 —— 缓解 `query_as` 的「字段名写错运行时才炸」 |
+| 连接超时旋钮 | `database.connect_timeout_secs` → `PoolOptions::acquire_timeout` | **实测**：sqlx 0.9 移除了 `PgConnectOptions::connect_timeout`（详见 NEX-8） |
+| 凭据承载 | `secrecy::SecretString` + **手写** `Debug` 的包装 | sqlx 的 `PgConnectOptions` 派生 `Debug`，**明文打印口令**（详见 NEX-8） |
 
 ### 实施时实测更正的两处文档偏差
 
