@@ -1,7 +1,7 @@
 ---
 id: NEX-2
 title: "chore(core): 接入 trybuild 负向测试框架"
-status: To Do
+status: Done
 assignee: []
 labels: [core, testing, p0]
 priority: medium

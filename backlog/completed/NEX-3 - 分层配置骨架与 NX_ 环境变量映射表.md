@@ -1,7 +1,7 @@
 ---
 id: NEX-3
 title: "feat(config): 分层配置骨架与 NX_ 环境变量映射表"
-status: To Do
+status: Done
 assignee: []
 labels: [config, p0]
 priority: medium
