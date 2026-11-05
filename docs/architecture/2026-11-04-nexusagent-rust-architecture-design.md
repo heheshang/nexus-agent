@@ -1463,6 +1463,7 @@ nexus-repo 实现：impl ChunkStore for PgChunkRepo { ... }   ← 实现在数�
 | `nexus-mcp` / `nexus-a2a` 位置 | 见 §4.3.1（已定稿） | 能力层（不依赖 `service`） | ✅ |
 | `nexus-vector` | 能力层（抽象 + 实现），见 §4.3.3 | 独立 crate | ✅ |
 | `nexus-service` → `nexus-execution` | 见 §4.3.2（已定稿） | 依赖 | ✅ |
+| **熔断状态外置** | 跨副本共享熔断状态 | **进程内**（`std::sync::Mutex` + 环形缓冲）—— **熔断是单副本粒度** | ⚠️ **显式接受**（见下方注记） |
 
 > **`nexus-rag` 的 trait 尚未落地 —— 这是 P2 的诚实结论。**
 >
@@ -1482,6 +1483,36 @@ nexus-repo 实现：impl ChunkStore for PgChunkRepo { ... }   ← 实现在数�
 >
 > **架构测试已把依赖方向锁住**：`nexus-repo` 只依赖能力层（含 `nexus-rag`），
 > 能力层不得反向依赖 `nexus-repo` —— 两侧都有可执行断言（§5.3）。
+
+> ### ⚠️ 熔断是**单副本粒度** —— 显式接受的局限
+>
+> **这是 P3 落地时必须表态的一条**（参考架构 §5.3 局限 #3）。
+>
+> 参考实现的熔断状态是**进程内**的（`internal/llm/fallback.go:13`，
+> `Gateway.breakers` 是个 map）。Rust 版沿用了这个形态 ——
+> `nexus-llm` 的 `BreakerRegistry` 用 `std::sync::Mutex` 保护一个 `HashMap`，
+> 状态**只在本进程内存在**。
+>
+> **后果**：多副本部署时，每个副本各有一套熔断状态 ——
+> 会出现「A 副本判定供应商已熔断并拒绝，B 副本却继续打」的不一致。
+> 从外部看，同一个供应商在**同一时刻**有的副本放行、有的副本拒绝。
+>
+> **本阶段明确接受这个局限**，理由：
+>
+> 1. 外置熔断状态（Redis / PG）需要**跨副本一致性与 fencing** ——
+>    那属于容量治理（`nexus-capacity`）的范畴，不在 P3 范围。
+> 2. 熔断的语义是「**减少**对已知故障供应商的调用」——
+>    单副本粒度下它仍然**有效**（A 副本确实少打了），
+>    只是**不是全局一致**。
+> 3. **沉默比不一致更危险** —— 如果读者以为多副本下也一致，
+>    那会在排障时得出完全错误的结论。
+>
+> **因此这里必须写出来**：熔断是**单副本粒度**，
+> 部署多副本时若需要全局一致的熔断，必须外置状态。
+>
+> 同样的声明也写在 `crates/nexus-llm/src/lib.rs` 的 crate 级文档里 ——
+> 那是对**开发者**的声明，这里是对**架构读者**的声明。
+> 契约载体：`docs/specs/p3/contracts/invariants.json` 的 **P3-I19**。
 
 
 **三个待定问题已在 2026-11-04 定稿** —— 依据是 `examples/` 下的实证 demo。
@@ -1745,6 +1776,12 @@ Rust 的测试可以验证「某段代码**不能**编译」：
 | 行类型列名与真实 schema 一致 | §3.9.3（`query_as` 运行期校验的代价） | ✅ 已落地（`nexus-repo` 的 `schema_conformance` 集成测试，NEX-11） |
 | outbox 表挂在**引擎侧** | §4.2 差异 1 | ✅ 已落地（NEX-13 的 `outbox_tables_are_engine_side_only` 源码扫描） |
 | 规范化 JSON 的实现**只有一份**（在 `nexus-core`） | §3.5 + §4.4 规则 2 | ✅ 已落地（NEX-13 的 `canonicalization_lives_in_nexus_core_only`） |
+| `nexus-llm` 不含 `Box<dyn`（enum 优于 dyn） | §2.3.2 | ✅ 已落地（NEX-16 / NEX-19 的 `nexus_llm_uses_no_box_dyn_trait_objects`，源码扫描） |
+| `nexus-llm` 不依赖 `nexus-repo`（网关不查库） | §4.2 差异 1 + 参考架构 §2.4 | ✅ 已落地（NEX-16 的 `nexus_llm_does_not_depend_on_nexus_repo`） |
+| `nexus-llm` 的熔断器用 `std::sync::Mutex` 而非 `tokio::sync::Mutex` | 参考架构 §3.1.3 | ✅ 已落地（NEX-18 的 `the_breaker_uses_a_standard_mutex_not_a_tokio_mutex`） |
+| 网关的**装配顺序**与契约一致 | 参考架构 §2.4 | ✅ 已落地（NEX-19 的 `the_gateway_pipeline_order_matches_the_contract`） |
+| 流式回退的**首事件边界**由类型表达 | §3.3 | ✅ 已落地（NEX-19 的 `the_stream_outcome_separates_before_start_from_after_start`） |
+| `ToolDef` 的**控制面字段**不进入上游请求体 | NEX-16 备注 | ✅ 已落地（NEX-19 的 `the_tool_control_plane_fields_never_reach_the_upstream_request`，剥注释后扫源码） |
 
 > **落地记录（2026-11-04，P1 完成）**：本表的后两项属于 **P2** ——
 > `workflow_runs` 的写入者与 `nexus-repo` 的依赖面都要等 P2 的
@@ -1798,6 +1835,35 @@ Rust 的测试可以验证「某段代码**不能**编译」：
 | 流式开始后不可回退 | 发出首字节后调 `fallback()`，断言报错 | ✅ 已验证（`demo-stream-fallback`） |
 | 定义哈希稳定 | 规范化性质测试（键序无关） | ✅ 已验证（`demo-canonical-json`） |
 | 错误码不泄露内部原因 | 序列化 `UserFacing`，断言不含 cause | ✅ 已验证（`demo-error-model` + `nexus-core` 负向用例） |
+| 预算不足在**调用前**被拒 | 单测：超预算 → `BudgetExceeded`，且无上游请求 | ✅ 已验证（`nexus-llm` 的 `oversized_body_is_rejected_before_any_upstream_call`） |
+| 预算错误**不可重试** | 断言 `RetryPolicy::Terminal` | ✅ 已验证（`nexus-llm` 的 `budget_error_is_terminal_not_retryable`） |
+| 预算裁剪是**纯函数** | 同输入同输出，入参未被修改 | ✅ 已验证（`nexus-llm` 的 `bounding_is_pure` + `bounding_does_not_mutate_the_input`） |
+| 预算裁剪的**双向边界** | 恰好填满通过，超出 1 字节拒绝 | ✅ 已验证（`nexus-llm` 的 `a_body_that_exactly_fits_is_accepted` + `one_byte_over_the_limit_is_rejected`） |
+| 每次尝试（含 fallback）**重跑**预算裁剪 | 网关测试 | ✅ 已验证（`nexus-llm` 的 `the_budget_is_recomputed_on_every_attempt`） |
+| 流式首事件**前**可回退 | 网关测试 | ✅ 已验证（`nexus-llm` 的 `the_stream_fails_before_the_first_event_can_fall_back`） |
+| 流式首事件**后**不可回退 | 网关测试 + **类型层**断言 | ✅ 已验证（`nexus-llm` 的 `the_stream_cannot_fall_back_after_the_first_event` + `the_stream_outcome_separates_before_start_from_after_start`） |
+| fallback 与 primary 同供应商**不切换** | 网关测试 | ✅ 已验证（`nexus-llm` 的 `no_fallback_when_the_provider_is_the_same`） |
+| 两边都失败时错误信息**含双方** | 网关测试 | ✅ 已验证（`nexus-llm` 的 `the_error_mentions_both_providers`） |
+| `UnknownOutcome` **不重试** | 重试测试 | ✅ 已验证（`nexus-llm` 的 `unknown_outcome_is_not_retried`） |
+| 熔断**预热期**不评估错误率 | 熔断器测试 | ✅ 已验证（`nexus-llm` 的 `the_warmup_period_does_not_evaluate_the_error_rate`） |
+| 取消**不计入**熔断样本 | 熔断器测试 | ✅ 已验证（`nexus-llm` 的 `cancellation_does_not_count_towards_the_breaker`） |
+| 熔断拒绝**不计入**熔断样本 | 熔断器测试 | ✅ 已验证（`nexus-llm` 的 `a_rejected_call_does_not_count_towards_the_breaker`） |
+
+> **落地记录（2026-11-05，P3 完成）**：上表的 P3 各行由 `nexus-llm` 承担，
+> 契约载体是 `docs/specs/p3/contracts/invariants.json`（19 条不变量，
+> 逐条指向**真实存在的测试名**）——
+> `scripts/check-specs.sh` 规则 3 会校验「契约引用的测试真的存在」，
+> 所以表里的每个测试名都不是手写的。
+>
+> 其中「流式首事件后不可回退」有**两层**防线：
+> 行为层测试验证「运行时确实拒绝了」，
+> 结构层测试验证「**类型上**没有漏网的路径」——
+> `StreamOutcome` 区分 `FailedBeforeStart`（可回退）与 `Stream`（不可回退），
+> 回退的**唯一入口**是前者。
+>
+> 行为层的断言经过了**变异测试**验证（注入故障确认会红）——
+> 其中一处变异暴露了「错误信息只查供应商代号」的弱断言，
+> 已 strengthening 为「双方各自的失败原因都要在内」。
 | 事件负载扁平化 | 断言 `type` 与其他字段同级 | ✅ 已验证（`demo-event-payload` + `nexus-core` 契约测试） |
 | 业务码值与分类不漂移 | 契约测试对照 §2.6.4.1 表逐条断言 | ✅ 已验证（`nexus-core` 契约测试，变异测试验证过有效性） |
 | ID 类型互不相同 | `TypeId` 去重后仍为 18 | ✅ 已验证（`nexus-core` 契约测试） |
@@ -1937,7 +2003,7 @@ cd <nexus-agent>/examples && cargo run -p demo-lease-fencing
 | **P0 骨架** | workspace、crate 边界、CI、架构测试 | 依赖方向违规能自动拦截 | ✅ 完成 |
 | **P1 核心类型** | `nexus-core` 的类型：取消语义、事件、错误 | 负向测试通过 | ✅ 完成（11 个负向用例 + 9 个跨模块契约测试） |
 | **P2 基础设施** | `nexus-infra`（PG/Redis/S3/Milvus）、`nexus-repo` | 迁移可应用、集成测试绿 | ✅ 完成（NEX-8..14；19 张 Phase 0 表在**空库**上可应用且可重复执行，50 个集成测试在 PostgreSQL 17 上全绿，CI 有 PG `services:` 且**真跑**集成测试） |
-| **P3 LLM 网关** | `nexus-llm`：供应商、预算、重试、熔断 | 预算裁剪与回退边界有测试 | ⬜ |
+| **P3 LLM 网关** | `nexus-llm`：供应商、预算、重试、熔断 | 预算裁剪与回退边界有测试 | ✅ 完成（NEX-16..19；9 个协议类型 + 预算裁剪 + 重试退避 + 熔断 + OpenAI 兼容客户端 + 网关回退边界，88 个测试；**熔断是单副本粒度** —— 见 §4.3） |
 | **P4 Agent 运行时** | `nexus-agent`：ReAct、上下文预算 | ReAct 循环有测试 | ⬜ |
 | **P5 协议层** | `nexus-api`：REST + SSE | SSE 半帧处理有测试 | ⬜ |
 | **P6 工作流** | `nexus-workflow` + `nexus-execution` | 租约、fencing、审批恢复有测试 | ⬜ |
@@ -1987,6 +2053,26 @@ P2 的完成判据「**迁移可应用、集成测试绿**」由 NEX-9 承担前
 3. **CI 解析 `cargo test` 输出**，断言各集成套件的测试数达阈值 —— 防止套件没被编进来。
 
 三者都用**注入故障**的方式验证过会红。
+
+## 6.2.3 P3 的具体任务
+
+| 任务 | 产出 | 契约依据 |
+|---|---|---|
+| NEX-16 | 网关协议类型（9 个）+ 契约测试 + 负向测试 | §2.3.2、§4.2 差异 2 |
+| NEX-17 | 上下文预算裁剪（`bound_chat_request`） | 参考架构 §3.1.1 |
+| NEX-18 | 重试（指数退避 + 抖动）与熔断器（含预热期） | §2.6.3、参考架构 §3.1.2 / §3.1.3 |
+| NEX-19 | OpenAI 兼容供应商客户端 + 网关装配 + **回退边界** | §2.3.2、§3.3、参考架构 §3.1.5 |
+| NEX-20 | 收口：架构文档同步 + **熔断粒度声明** | §5.2、§5.3、§5.4、§6.1 |
+
+P3 的完成判据「**预算裁剪与回退边界有测试**」由 NEX-17 与 NEX-19 分别承担：
+
+- **预算裁剪**：19 条不变量中的 P3-I01..I05，逐条指向 `nexus-llm` 的真实测试名
+  （`docs/specs/p3/contracts/invariants.json`）。
+- **回退边界**：P3-I06..I09，其中「首事件后不可回退」有**两层**防线 ——
+  行为层验证运行时行为，结构层验证类型上没有漏网路径。
+
+与 P1 / P2 同样的防伪纪律：**契约引用的测试必须真的存在**
+（`scripts/check-specs.sh` 规则 3），且关键断言经过**变异测试**验证会红。
 
 ## 6.3 设计定稿的门槛
 
@@ -2119,15 +2205,15 @@ P2 的完成判据「**迁移可应用、集成测试绿**」由 NEX-9 承担前
 |---|---|---|
 | §2.1.3 规则 B（`RequestScope` 上没有落库方法） | 负向测试：忘记 `detach()` 的代码无法落库 | ✅ 已验证（`demo-cancel-typestate`，`trybuild` 固化） |
 | §3.1 消费者定义 trait 打破环 | 构造 `rag` ↔ `repo` 的真实双向需求，验证不产生环 | ✅ 已验证（`demo-consumer-trait`） |
-| §3.3 流式开始后不可回退 | 「yield 之前锁定 provider」的时序点测试 | ✅ 已验证（`demo-stream-fallback`） |
+| §3.3 流式开始后不可回退 | 「yield 之前锁定 provider」的时序点测试 | ✅ 已验证（`demo-stream-fallback`）**+ 生产实现两层防线**（NEX-19：行为层 `the_stream_cannot_fall_back_after_the_first_event` + 结构层 `the_stream_outcome_separates_before_start_from_after_start` —— 后者验证**类型上**没有漏网路径） |
 | §3.5 规范化 JSON 的稳定性 | 性质测试：键序无关 | ✅ 已验证（`demo-canonical-json`，8 项测试） |
 | §3.6 SQL AST 级校验 | `sqlparser` 对畸形 SQL 的拒绝率 | ✅ 已验证（`demo-sql-guard`，25 用例） |
 | §3.2 双通道背压 | 可丢通道满时丢弃、必达通道挂起 | ✅ 已验证（`demo-backpressure`） |
 | §2.2.4 事件负载扁平化 | enum → 扁平 JSON，`type` 与字段同级 | ✅ 已验证（`demo-event-payload`） |
 | §2.6.5 内部原因不外泄 | `UserFacing` 类型上无法携带内部原因 | ✅ 已验证（`demo-error-model`） |
 | §3.7 `VersionedStore` 契约 | 三个实现的幂等覆盖与版本空间隔离 | ⬜ 未验证（P2） |
-| §2.3.2 enum 优于 `dyn` 的性能收益 | 基准测试：热路径单态化 vs 虚调用 | ⬜ 未验证（P2） |
-| §2.6.3 `UnknownOutcome` 分类 | 端到端：超时场景不重复副作用 | ⬜ 未验证（P2） |
+| §2.3.2 enum 优于 `dyn` 的性能收益 | 基准测试：热路径单态化 vs 虚调用 | ⬜ 未验证（P2）**—— P3 只验证了「类型上不含 `Box<dyn`」（结构层断言 `nexus_llm_uses_no_box_dyn_trait_objects`），**没有**实测性能收益。形状 ≠ 性能。 |
+| §2.6.3 `UnknownOutcome` 分类 | 端到端：超时场景不重复副作用 | 🟡 **部分验证**（P3：`nexus-llm` 的 `unknown_outcome_is_not_retried` 断言超时**不被自动重试**；但「端到端不重复副作用」需要 P6 的持久执行来验证 —— 请求是否已到达上游**无法在网关层观测**） |
 | **MCP 服务端的信任边界模型** | 谁能调用、用谁的凭据、配额算谁的、审计记谁 | ⬜ 未设计（§4.3.1 遗留项） |
 
 ### 附录 C.1 · 验证过程中发现的实现陷阱

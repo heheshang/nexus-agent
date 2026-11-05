@@ -48,7 +48,7 @@
 | **NEX-17** | T-002 | 上下文预算裁剪（`bound_chat_request`） | NEX-16 | §3.1.1、参考架构 §3.1.1 | ✅ 完成 |
 | **NEX-18** | T-003 | 重试（指数退避 + 抖动）与熔断器（含预热期） | NEX-16 | §2.6.3、参考架构 §3.1.2 / §3.1.3 | ✅ 完成 |
 | **NEX-19** | T-004 | OpenAI 兼容供应商客户端 + 网关装配 + 回退边界 | NEX-16/17/18 | §2.3.2、§3.3、参考架构 §3.1.5 | ✅ 完成 |
-| **NEX-20** | T-005 | P3 收口：架构文档同步 + 熔断粒度声明 + CI 门禁 | NEX-16..19 | §5.2、§5.3、§5.4、§6.1 | ⬜ Todo |
+| **NEX-20** | T-005 | P3 收口：架构文档同步 + 熔断粒度声明 + CI 门禁 | NEX-16..19 | §5.2、§5.3、§5.4、§6.1 | ✅ 完成 |
 
 依赖图：
 
@@ -70,6 +70,8 @@ NEX-16 / T-001 (类型 + 描述符)
 | NEX-16 | 9 个协议类型 + 16 个契约测试 + 3 个负向测试 | `nexus-llm/tests/types_contract.rs`、`tests/compile_fail/` |
 | NEX-17 | `bound_chat_request` 纯函数 + 14 个测试 | `nexus-llm/src/budget.rs` |
 | NEX-18 | `retry_do` + `CircuitBreaker` + 结构层断言 | `nexus-llm/src/retry.rs`、`src/breaker.rs`、`tests/architecture.rs` |
+| NEX-19 | 上游协议类型 + 协议转换 + SSE 解析 + 供应商客户端 + 网关（含回退边界） | `nexus-llm/src/protocol.rs`、`src/convert.rs`、`src/sse.rs`、`src/provider.rs`、`src/gateway.rs` |
+| NEX-20 | 架构文档同步（§4.3 / §5.3 / §5.4 / §6.1）+ 熔断粒度声明 + crate 级文档 | `docs/architecture/2026-11-04-nexusagent-rust-architecture-design.md`、`crates/nexus-llm/src/lib.rs` |
 
 ## 两条不可让步的红线
 
@@ -153,4 +155,31 @@ bash scripts/check-lock.sh && bash scripts/check-deps.sh \
 > 三条防伪要求（NEX-14 的教训）同样适用于这个门禁：
 > **门禁本身必须被验证过会红**。已用注入故障验证：
 > 篡改码值 / 引用不存在的测试 / 引用不存在的 backlog 任务 —— 三条均被抓住。
+
+## P3 完成状态（2026-11-05）
+
+P3 **全部五个任务已完成**（NEX-16..20），完成判据「**预算裁剪与回退边界有测试**」成立。
+
+| 判据 | 承担者 | 验证方式 |
+|---|---|---|
+| 预算裁剪有测试 | NEX-17 | 14 个单元测试 + P3-I01..I05 |
+| 回退边界有测试 | NEX-19 | 7 个网关行为层测试 + 3 个结构层断言 + P3-I06..I09 |
+
+**19 条不变量逐条指向真实存在的测试名**（`contracts/invariants.json`），
+由 `scripts/check-specs.sh` 规则 3 持续校验。
+
+### P3 **没有**覆盖的范围
+
+写清楚这些，避免读者把「P3 完成」误读成「模型网关完备」：
+
+| 项 | 为什么不在 P3 | 何时补 |
+|---|---|---|
+| **真实上游连通性** | 不依赖真实模型服务 | 集成环境（需 API key） |
+| **成本核算的准确性** | token 估算是保守上界，不是厂商计费口径 | P4（用量对账） |
+| **跨副本熔断一致性** | 熔断是进程内状态，单副本粒度（决策 D3） | 容量治理阶段（外置到 Redis/PG） |
+| **ollama 原生协议** | 与 OpenAI 兼容是两套字段形状 | 需要时（决策 D2） |
+| **SSE 完整分帧** | 属 P5 的 SSE 桥接 | P5 |
+| **跨副本配额协调** | 属容量治理（`nexus-capacity`） | 容量治理阶段 |
+| **`UnknownOutcome` 的端到端验证** | 「请求是否已到达上游」在网关层**不可观测** | P6（持久执行） |
+| **enum 优于 `dyn` 的性能收益** | P3 只验证了**类型形状**，没实测性能 | 性能验证阶段（§5.6） |
 
