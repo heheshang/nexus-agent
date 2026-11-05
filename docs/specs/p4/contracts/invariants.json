@@ -257,27 +257,34 @@
       "statement": "事件序号严格单调、无重复、无空洞（并发工具调用下）",
       "layer": "behavior",
       "verified_by": [
-        "crates/nexus-agent/tests/events.rs::the_event_sequence_is_strictly_monotonic_under_concurrent_tool_calls"
+        "crates/nexus-agent/tests/events.rs::concurrent_producers_still_yield_a_strictly_monotonic_sequence",
+        "crates/nexus-agent/tests/events.rs::sequence_starts_at_one_and_is_strictly_monotonic",
+        "crates/nexus-agent/tests/events.rs::sequence_matches_write_order_within_the_guaranteed_channel",
+        "crates/nexus-agent/tests/events.rs::the_sink_does_not_use_a_mutex"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P4-I19",
       "statement": "终态事件**必达**、增量**可丢** —— 填满增量通道后终态仍然送达",
       "layer": "behavior",
       "verified_by": [
-        "crates/nexus-agent/tests/events.rs::the_terminal_event_is_delivered_when_the_lossy_channel_is_full"
+        "crates/nexus-agent/tests/events.rs::terminal_events_are_delivered_even_after_the_lossy_channel_is_full",
+        "crates/nexus-agent/tests/events.rs::only_delta_and_reasoning_are_lossy",
+        "crates/nexus-agent/tests/events.rs::a_full_lossy_channel_never_blocks",
+        "crates/nexus-agent/tests/events.rs::a_full_guaranteed_channel_waits_instead_of_dropping"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P4-I20",
       "statement": "背压超时**主动取消**整个运行，而不是无限阻塞",
       "layer": "behavior",
       "verified_by": [
-        "crates/nexus-agent/tests/events.rs::backpressure_cancels_the_run_instead_of_blocking_forever"
+        "crates/nexus-agent/tests/events.rs::backpressure_timeout_cancels_the_run_instead_of_blocking_forever",
+        "crates/nexus-agent/tests/events.rs::after_backpressure_the_sink_stops_accepting_guaranteed_events"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P4-I21",
