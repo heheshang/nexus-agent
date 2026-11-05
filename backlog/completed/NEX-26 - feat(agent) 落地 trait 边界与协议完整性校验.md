@@ -1,7 +1,7 @@
 ---
 id: NEX-26
 title: "feat(agent): 落地 trait 边界与协议完整性校验"
-status: To Do
+status: Done
 assignee: []
 labels: [agent, react, contract]
 priority: medium
@@ -75,16 +75,16 @@ P4 的 `ChatModel` 是**消费者定义的** —— ReAct 循环是消费者，�
 
 ## Acceptance Criteria
 
-- [ ] #1 `crates/nexus-agent/src/react.rs` 定义 `ChatModel` trait，方法签名用 `nexus_llm::types::{ChatRequest, ChatResponse, StreamEvent}`
-- [ ] #2 `nexus-agent` **不引用** `nexus_llm::Gateway` 具体类型 —— `Gateway` 经 trait 注入
-- [ ] #3 `ChatModel` trait 用**泛型 + 静态分发**，`nexus-agent` 源码里**不含** `Box<dyn ChatModel>`
-- [ ] #4 `crates/nexus-agent/src/tools.rs` 定义 `InvokableTool` trait，且**是 `dyn` 兼容**的（工具注册表是异构集合）
-- [ ] #5 `crates/nexus-agent/src/protocol.rs` 实现配对校验：孤立 tool_result、缺失 tool_result、重复 tool_call ID 三种情况均被拒
-- [ ] #6 配对校验失败返回 `ErrorCode::InvalidParam`（10001）
-- [ ] #7 配对校验的失败**发生在裁剪之前** —— 配对断裂时报的是配对错误，不是预算错误
-- [ ] #8 `crates/nexus-agent/tests/architecture.rs` 断言 `nexus-agent` 不依赖 `nexus-repo` / `nexus-service` / `nexus-api`
-- [ ] #9 `crates/nexus-agent/Cargo.toml` **不新增**任何内部 crate 依赖
-- [ ] #10 `cargo fmt --all --check` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo test --workspace --locked` 通过
+- [x] #1 `crates/nexus-agent/src/react.rs` 定义 `ChatModel` trait，方法签名用 `nexus_llm::types::{ChatRequest, ChatResponse, StreamEvent}`
+- [x] #2 `nexus-agent` **不引用** `nexus_llm::Gateway` 具体类型 —— `Gateway` 经 trait 注入
+- [x] #3 `ChatModel` trait 用**泛型 + 静态分发**，`nexus-agent` 源码里**不含** `Box<dyn ChatModel>`
+- [x] #4 `crates/nexus-agent/src/tools.rs` 定义 `InvokableTool` trait，且**是 `dyn` 兼容**的（工具注册表是异构集合）
+- [x] #5 `crates/nexus-agent/src/protocol.rs` 实现配对校验：孤立 tool_result、缺失 tool_result、重复 tool_call ID 三种情况均被拒
+- [x] #6 配对校验失败返回 `ErrorCode::InvalidParam`（10001）
+- [x] #7 配对校验的失败**发生在裁剪之前** —— 配对断裂时报的是配对错误，不是预算错误
+- [x] #8 `crates/nexus-agent/tests/architecture.rs` 断言 `nexus-agent` 不依赖 `nexus-repo` / `nexus-service` / `nexus-api`
+- [x] #9 `crates/nexus-agent/Cargo.toml` **不新增**任何内部 crate 依赖
+- [x] #10 `cargo fmt --all --check` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo test --workspace --locked` 通过
 
 ## DoR 判定
 
@@ -121,11 +121,11 @@ crate 依赖方向。
 
 | 位置 | 影响 |
 |---|---|
-| `crates/nexus-agent/src/react.rs` | **新增** —— trait 定义 |
-| `crates/nexus-agent/src/tools.rs` | **新增** —— trait 定义 |
+| `crates/nexus-agent/src/traits.rs` | **新增** —— `ChatModel` 与 `InvokableTool` trait 定义（实际文件名与 AC 写的不同，见「发现 3」） |
 | `crates/nexus-agent/src/protocol.rs` | **新增** —— 配对校验 |
+| `crates/nexus-agent/src/lib.rs` | **修改** —— crate 级文档 + 模块声明 |
 | `crates/nexus-agent/tests/architecture.rs` | **新增** —— 结构层断言 |
-| `crates/nexus-agent/Cargo.toml` | **可能**新增 `async-trait`（已在 workspace 依赖里） |
+| `crates/nexus-agent/Cargo.toml` | **新增** `thiserror.workspace = true`（外部 crate，非内部依赖） |
 
 ### #6 完成态可描述
 
@@ -167,4 +167,85 @@ crate 依赖方向。
 
 ## 实现过程中的发现
 
-（待补）
+### 发现 1 —— `ChatModel` 的 `Send` 约束逼退了 `async fn`（**改变了设计**）
+
+最初按架构文档 §2.3.2 的字面写「泛型 + AFIT」，即 `async fn chat(...)`。
+编译立刻给出 `async_fn_in_trait` 警告 ——
+
+> use of `async fn` in public traits is discouraged as auto trait bounds cannot be specified
+
+**根因**：AFIT 返回的 future **不能声明 `Send` 约束**。
+而 `ChatModel` 的实现会被放进 `tokio::spawn` —— 那里**必须**要求 `Send`。
+
+改成脱糖形态：
+
+```rust
+fn chat(&self, ...) -> impl Future<Output = Result<ChatResponse, AppError>> + Send;
+```
+
+代价是 clippy 的 `manual_async_fn` 会建议改回 `async fn` ——
+用**显式**的 `#[allow(clippy::manual_async_fn)]` 豁免，并在代码里写明理由。
+
+> **意外的收获**：这个形态让 **`Box<dyn ChatModel>` 在编译期就不可能** ——
+> `error[E0038]: the trait ChatModel is not dyn compatible`。
+>
+> 也就是说 AC #3 「不用 `Box<dyn ChatModel>`」**不再只靠源码扫描**，
+> 而是**由类型系统保证**。架构测试的源码扫描是**第二道**防线。
+
+### 发现 2 —— `thiserror` 需要加进 `nexus-agent` 的依赖
+
+`nexus-agent` 之前是空壳，没有依赖 `thiserror`。
+AC #9 说的是「**不新增任何内部 crate 依赖**」—— `thiserror` 是**外部** crate，
+且**已在 workspace 根 manifest** 里（`thiserror = "2.0.21"`），
+按依赖锁定纪律用 `thiserror.workspace = true` 引用。
+
+### 发现 3 —— 文件名与 AC 里写的不同
+
+AC #1 / #4 写的是 `src/react.rs` 与 `src/tools.rs`，
+实际落地为 **`src/traits.rs`**（两个 trait 放一起）。
+
+**理由**：两个 trait 是**一对**（一静一动），
+放一起能让「为什么 `dyn` 策略相反」这个**最容易做错**的对比**并排可见**。
+`react.rs` 留给 NEX-29 的循环本体，`tools.rs` 留给 NEX-29 的工具执行与截断。
+
+> 这是一处**范围无害**的偏离 —— 不影响契约，不影响依赖方向，
+> 但**必须显式记录**（`ai-sdlc-implementation.mdc` §4「不静默偏离」）。
+
+### 发现 4 —— `pending` 用 `Vec` 而不是 `HashSet`
+
+参考架构 §3.2.2 说「Rust 的 `HashSet` 无序，但这里只做存在性判断，无序无影响」。
+
+但**错误信息**需要按**发生顺序**列出未闭合的调用 ID —— 顺序本身是**诊断信息**的一部分。
+所以 `pending` 用 `Vec`（去重由 `seen_call_ids: HashSet` 负责）。
+
+### 发现 5 —— E0502：`find` 拿引用后 `retain`
+
+```rust
+let Some(call_id) = pending.iter().find(...) else { ... };
+pending.retain(|id| id != call_id);   // ← E0502：同时可变与不可变借用
+```
+
+改成**先取位置再删**：
+
+```rust
+let found = pending.iter().position(|id| *id == message.tool_call_id);
+let Some(index) = found else { ... };
+pending.remove(index);
+```
+
+### 门禁自身的防伪验证
+
+三条结构层断言都用**注入故障**验证过会红：
+
+| 注入 | 结果 |
+|---|---|
+| `fn _inject() -> Box<dyn ChatModel>` | **编译失败**（E0038，类型系统直接拦住） |
+| `fn _inject(g: &nexus_llm::Gateway)` | 架构测试 FAILED ✓ |
+| `Cargo.toml` 加 `nexus-repo.workspace = true` | 架构测试 FAILED ✓ |
+
+### 验证结果
+
+- `cargo test -p nexus-agent`：18 个测试（13 单元 + 5 结构层）全绿
+- `cargo fmt --all --check` 通过
+- `cargo clippy -p nexus-agent --all-targets --locked -- -D warnings` 零告警
+- 7 个组织纪律门禁全绿
