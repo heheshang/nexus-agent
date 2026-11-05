@@ -230,3 +230,62 @@ fn the_api_crate_does_not_implement_jwt_verification() {
         "决策 D10：JWT 校验由上层经 trait 注入，nexus-api 不自行实现。违规文件：{offenders:?}"
     );
 }
+
+#[test]
+fn the_api_crate_does_not_use_the_service_crate() {
+    // AC #6：`nexus-api` **不引用** `nexus-service` 的**具体类型**。
+    //
+    // 同 P4 的 D4 纪律 —— `nexus-api` 依赖的是 **trait**（消费方定义 trait），
+    // 不是 `nexus-service` 的具体实现。
+    //
+    // 为什么这条重要：`nexus-service` 是 7 行空壳，且 P5 的边界是
+    // **传输层**。一旦 `nexus-api` 引用了它的具体类型，
+    // P5 就**阻塞于** P6 的业务编排 —— 决策 D9 会被静默推翻。
+    //
+    // ⚠️ 只扫 `src/`（不含 `tests/`）——
+    // 测试里用 `nexus-service` 造假数据是允许的。
+    let offenders: Vec<String> = source_files()
+        .iter()
+        .filter(|p| {
+            let stripped = read_stripped(p);
+            stripped.contains("nexus_service") || stripped.contains("use nexus_service")
+        })
+        .map(|p| p.display().to_string())
+        .collect();
+
+    assert!(
+        offenders.is_empty(),
+        "AC #6：nexus-api 不得引用 nexus-service 的具体类型，只依赖 trait 接缝。违规文件：{offenders:?}"
+    );
+}
+
+#[test]
+fn the_bridge_does_not_carry_a_heartbeat_timer() {
+    // AC #9：心跳是**路由**的职责 —— 桥接**不自带**定时器（spec §3.2）。
+    //
+    // 为什么这条要单独钉住：把心跳做成桥接的**可配置项**
+    // 会让桥接承担**两条**职责（事件 → 帧 + 保活），
+    // 而心跳频率实际上由**路由**的读超时配置决定。
+    //
+    // ⚠️ 桥接里**允许**出现 `ping` —— 它只是帧的**字节内容**。
+    // 被禁止的是**定时器**（`interval` / `sleep` / `tokio::time`）。
+    let offenders: Vec<String> = source_files()
+        .iter()
+        .filter(|p| {
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+            if name != "bridge.rs" {
+                return false;
+            }
+            let stripped = read_stripped(p);
+            stripped.contains("tokio::time")
+                || stripped.contains("sleep(")
+                || stripped.contains("interval(")
+        })
+        .map(|p| p.display().to_string())
+        .collect();
+
+    assert!(
+        offenders.is_empty(),
+        "心跳是路由的职责 —— 桥接不得自带定时器（spec §3.2）。违规文件：{offenders:?}"
+    );
+}

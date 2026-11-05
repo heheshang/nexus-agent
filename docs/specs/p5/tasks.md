@@ -76,7 +76,7 @@
 
 路由可**增量注册**；交付**一个**真实可跑的 SSE 端点（数据源是注入的 trait）。
 
-对应 backlog 任务：`backlog/tasks/NEX-34 - feat(api) 落地协议层中间件与路由骨架.md`
+对应 backlog 任务：`backlog/completed/NEX-34 - feat(api) 落地协议层中间件与路由骨架.md`
 依赖：T-002、T-003
 对应设计条款：架构文档 §1.4；参考架构 §0.3、§0.4
 

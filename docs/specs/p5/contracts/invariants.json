@@ -262,18 +262,21 @@
       "layer": "behavior",
       "verified_by": [
         "crates/nexus-api/tests/middleware.rs::a_failed_identity_extraction_is_rejected",
-        "crates/nexus-api/tests/middleware.rs::the_rejection_uses_the_unified_response_shape"
+        "crates/nexus-api/tests/middleware.rs::the_rejection_uses_the_unified_response_shape",
+        "crates/nexus-api/tests/middleware.rs::a_forbidden_extraction_maps_to_403"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P5-I22",
       "statement": "鉴权成功后身份进入请求 Extension，handler 可取用",
       "layer": "behavior",
       "verified_by": [
-        "crates/nexus-api/tests/middleware.rs::the_identity_reaches_the_handler"
+        "crates/nexus-api/tests/middleware.rs::the_identity_reaches_the_handler",
+        "crates/nexus-api/tests/middleware.rs::the_extractor_receives_the_request_headers",
+        "crates/nexus-api/tests/router.rs::the_sse_endpoint_receives_the_authenticated_identity"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P5-I23",
@@ -282,7 +285,7 @@
       "verified_by": [
         "crates/nexus-api/tests/architecture.rs::the_api_crate_does_not_implement_jwt_verification"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P5-I24",
@@ -299,6 +302,57 @@
       "layer": "structure",
       "verified_by": [
         "crates/nexus-api/tests/architecture.rs::the_api_crate_adds_no_internal_dependencies"
+      ],
+      "status": "verified"
+    },
+    {
+      "id": "P5-I26",
+      "statement": "路由可增量注册 —— 后注册的路由不影响先注册的",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/tests/router.rs::the_router_builder_registers_routes_incrementally"
+      ],
+      "status": "verified"
+    },
+    {
+      "id": "P5-I27",
+      "statement": "路由层注入心跳 —— 空闲连接写出 : ping\\n\\n 注释帧；桥接不自带定时器",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/tests/router.rs::the_heartbeat_is_written_on_an_idle_connection",
+        "crates/nexus-api/tests/router.rs::the_heartbeat_is_disabled_when_the_interval_is_absent",
+        "crates/nexus-api/tests/architecture.rs::the_bridge_does_not_carry_a_heartbeat_timer"
+      ],
+      "status": "verified"
+    },
+    {
+      "id": "P5-I28",
+      "statement": "请求 ID 分配或透传 —— 放进请求 Extension 与响应头 x-request-id",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/tests/middleware.rs::a_request_id_is_generated_when_none_is_inbound",
+        "crates/nexus-api/tests/middleware.rs::an_inbound_request_id_is_passed_through",
+        "crates/nexus-api/tests/middleware.rs::a_malformed_inbound_request_id_is_replaced",
+        "crates/nexus-api/tests/router.rs::the_request_id_is_present_on_every_route"
+      ],
+      "status": "verified"
+    },
+    {
+      "id": "P5-I29",
+      "statement": "结构层：nexus-api 不引用 nexus-service 的具体类型 —— 只依赖 trait 接缝",
+      "layer": "structure",
+      "verified_by": [
+        "crates/nexus-api/tests/architecture.rs::the_api_crate_does_not_use_the_service_crate"
+      ],
+      "status": "verified"
+    },
+    {
+      "id": "P5-I30",
+      "statement": "SSE 端点真实可跑 —— 数据源是注入的 trait，端到端产出完整 SSE 帧流",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/tests/router.rs::the_sse_demo_endpoint_is_reachable_and_streams_frames",
+        "crates/nexus-api/tests/router.rs::the_sse_demo_endpoint_is_not_registered_without_a_provider"
       ],
       "status": "verified"
     }
