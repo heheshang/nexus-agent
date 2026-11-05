@@ -1,7 +1,7 @@
 ---
 id: NEX-27
 title: "feat(agent): 落地上下文整轮淘汰"
-status: To Do
+status: Done
 assignee: []
 labels: [agent, compaction, budget]
 priority: medium
@@ -73,18 +73,18 @@ references:
 
 ## Acceptance Criteria
 
-- [ ] #1 `crates/nexus-agent/src/compaction.rs` 实现 `compact_input_history` —— **纯函数**，不修改入参
-- [ ] #2 保留**所有** system 消息
-- [ ] #3 保留**首个 user 之前的前缀**
-- [ ] #4 保留**最新一轮 user** 轮
-- [ ] #5 历史 user 轮按**整轮**删除 —— 该轮的 assistant 消息与**所有**并行 tool 结果**一起**被删，不留孤立 tool_result
-- [ ] #6 **不生成摘要** —— 保留的消息是原样的，未新增任何摘要消息
-- [ ] #7 裁剪后**复核**协议完整性 —— 裁剪结果仍然配对完整
-- [ ] #8 仍超预算时返回 `ErrorCode::BudgetExceeded`（30006）
-- [ ] #9 边界值双向测试：恰好在预算内通过、超出即拒绝
-- [ ] #10 工具定义计入预算
-- [ ] #11 配对校验**先于**裁剪 —— 配对断裂时即使超预算，报的也是配对错误
-- [ ] #12 `cargo fmt --all --check` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo test --workspace --locked` 通过
+- [x] #1 `crates/nexus-agent/src/compaction.rs` 实现 `compact_input_history` —— **纯函数**，不修改入参
+- [x] #2 保留**所有** system 消息
+- [x] #3 保留**首个 user 之前的前缀**
+- [x] #4 保留**最新一轮 user** 轮
+- [x] #5 历史 user 轮按**整轮**删除 —— 该轮的 assistant 消息与**所有**并行 tool 结果**一起**被删，不留孤立 tool_result
+- [x] #6 **不生成摘要** —— 保留的消息是原样的，未新增任何摘要消息
+- [x] #7 裁剪后**复核**协议完整性 —— 裁剪结果仍然配对完整
+- [x] #8 仍超预算时返回 `ErrorCode::BudgetExceeded`（30006）
+- [x] #9 边界值双向测试：恰好在预算内通过、超出即拒绝
+- [x] #10 工具定义计入预算
+- [x] #11 配对校验**先于**裁剪 —— 配对断裂时即使超预算，报的也是配对错误
+- [x] #12 `cargo fmt --all --check` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo test --workspace --locked` 通过
 
 ## DoR 判定
 
@@ -167,4 +167,67 @@ ReAct 循环每步都能拿到一个**在预算内**且**协议完整**的历史
 
 ## 实现过程中的发现
 
-（待补）
+### 发现 1 —— **`drain(start..end)` 会删掉轮次中间的 system 消息
+
+参考架构 §3.2.1 的算法第 4 步原文：
+「从最早的 user 轮开始，逐轮删除（直到下一个 user 轮为止的所有消息，
+**但跳过 system 消息**）」。
+
+「但跳过 system 消息」这半句**很容易漏** —— 直接 `drain` 会把夹在轮次中间的
+system 消息（那也是**指令**）一起删掉。
+
+实测：`all_system_messages_are_retained` 测试第一次就是红的 ——
+`left: ["系统一"]`, `right: ["系统一", "系统二"]`。
+
+改成**逐条删、跳过 system**：
+
+```rust
+while index < end {
+    if retained[index].role == Role::System { index += 1; continue; }
+    retained.remove(index);
+    end -= 1;
+}
+```
+
+### 发现 2 —— 删除会让**下标全部前移**（两个 bug）
+
+**Bug A**：`end` 是在删除**之前**算出的。每删一条消息，后续消息的下标**全部前移一位**
+—— 所以 `end` 必须**同步收缩**，否则 `retained[index]` 会**越界 panic**。
+
+**Bug B**：一次算好所有轮的边界、然后逐轮 `drain` —— 删除会**移动下标**，
+第二轮的 `start`/`end` 已经**指向别的位置**了。
+
+改成**每轮重新计算**轮次边界（`find_turns(&retained)`）—— 简单且不会错。
+
+### 发现 3 —— 测试里的预算**必须按内容算**，不能硬编码
+
+第一版测试硬编码 `budget = 120`，但那条历史实际需要 134 —— 全部红。
+
+改成 `budget_of(&messages)` 辅助函数，从**期望保留集**算出精确预算。
+这让测试真正测的是「**边界**」而不是「某个魔数」。
+
+> **顺带修正了一个认知错误**：预算要按**期望保留集**算，
+> 因为 **system 消息不随轮次淘汰** —— 它们仍然占用预算。
+> 「系统二」就夹在第一轮**中间**，它留在保留集里。
+
+### 发现 4 —— `evicted_turns` 计的是**轮**不是**消息**
+
+第一版在循环内 `evicted_turns += 1`，那数的是**删掉的消息数**。
+语义应是**轮数** —— 移到循环末尾。
+
+### 门禁自身的防伪验证
+
+四条关键断言都用**注入故障**验证过会红：
+
+| 注入 | 结果 |
+|---|---|
+| 改成**按条**淘汰（留下孤立 `tool_result`） | `a_whole_turn_is_evicted_with_its_parallel_tool_results` FAILED ✓ |
+| 只在**裁剪成功后**才校验协议（顺序颠倒） | `the_pairing_check_runs_before_the_budget_check` FAILED ✓（报 `BudgetExceeded` 而非 `InvalidParam`） |
+| 裁剪时**产生副作用**（模拟改入参） | `compaction_is_pure` FAILED ✓ |
+| 硬编码过小的预算 | 5 个测试同时红 ✓ |
+
+### 验证结果
+
+- `cargo test -p nexus-agent`：31 个测试（26 单元 + 5 结构层）全绿
+- `cargo fmt --all --check` 通过
+- `cargo clippy -p nexus-agent --all-targets --locked -- -D warnings` 零告警

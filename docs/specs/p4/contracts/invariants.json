@@ -128,7 +128,8 @@
       "layer": "behavior",
       "$comment": "NEX-26 交付时，测试落在 protocol.rs —— 因为那时 compaction.rs 还不存在。NEX-27 落地裁剪后，这条不变量的**完整**形态（真实裁剪路径）由 compaction.rs 的测试承担。",
       "verified_by": [
-        "crates/nexus-agent/src/protocol.rs::the_pairing_check_runs_before_the_budget_check"
+        "crates/nexus-agent/src/protocol.rs::the_pairing_check_runs_before_the_budget_check",
+        "crates/nexus-agent/src/compaction.rs::the_pairing_check_runs_before_the_budget_check"
       ],
       "status": "verified"
     },
@@ -139,7 +140,7 @@
       "verified_by": [
         "crates/nexus-agent/src/compaction.rs::all_system_messages_are_retained"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P4-I06",
@@ -148,7 +149,7 @@
       "verified_by": [
         "crates/nexus-agent/src/compaction.rs::the_latest_user_turn_is_retained"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P4-I07",
@@ -157,7 +158,7 @@
       "verified_by": [
         "crates/nexus-agent/src/compaction.rs::a_whole_turn_is_evicted_with_its_parallel_tool_results"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P4-I08",
@@ -166,7 +167,7 @@
       "verified_by": [
         "crates/nexus-agent/src/compaction.rs::no_summary_message_is_generated"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P4-I09",
@@ -176,7 +177,7 @@
         "crates/nexus-agent/src/compaction.rs::compaction_is_pure",
         "crates/nexus-agent/src/compaction.rs::compaction_does_not_mutate_the_input"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P4-I10",
@@ -186,7 +187,7 @@
         "crates/nexus-agent/src/compaction.rs::a_history_that_exactly_fits_is_accepted",
         "crates/nexus-agent/src/compaction.rs::an_oversized_history_is_rejected"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P4-I11",

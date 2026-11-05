@@ -45,9 +45,11 @@
 //!
 //! 详见 `docs/specs/p4/spec.md` 与 `docs/specs/p4/contracts/`。
 
+pub mod compaction;
 pub mod protocol;
 pub mod traits;
 
+pub use compaction::{CompactedHistory, compact_input_history};
 pub use protocol::{ProtocolError, ProtocolSummary, validate_messages};
 pub use traits::{ChatModel, InvokableTool};
 
