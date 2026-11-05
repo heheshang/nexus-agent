@@ -55,16 +55,16 @@ P3 的第一个任务：落地 `nexus-llm` 的**核心类型** —— 消息、�
 
 ## Acceptance Criteria
 
-- [ ] #1 `crates/nexus-llm/src/types.rs` 落地 `Message` / `Role` / `ToolCall` / `ToolDef` / `ChatRequest` / `Usage` / `ChatResponse` / `StreamEvent` / `ModelDescriptor`
-- [ ] #2 所有公共类型实现 `Debug`（workspace lint `missing_debug_implementations` 通过）
-- [ ] #3 `ModelDescriptor` 的 `api_key` 用 `secrecy::SecretString` 承载；`Debug` 输出**不含**明文口令
-- [ ] #4 `StreamEvent` 的错误字段**不参与序列化**（`json = "-"`）—— 内部错误绝不外泄给客户端
-- [ ] #5 `Role` 是 `enum`（不是 `String`）—— 角色取值在类型上封闭
-- [ ] #6 `ToolDef` 的**权威执行元数据**（`dangerous` / `replay_policy` / `source_identity` / `binding_version`）**不序列化** —— 那是控制面的东西，不是给模型看的
-- [ ] #7 `nexus-llm` 的 `Cargo.toml` **不依赖** `nexus-repo`（§4.2 差异 1 + 参考架构 §2.4）
-- [ ] #8 `cargo test -p nexus-llm` 通过；`cargo clippy -p nexus-llm --all-targets --locked -- -D warnings` 零告警；`cargo fmt --all --check` 通过
-- [ ] #9 有**契约测试**：类型字段与参考实现的 `internal/llm/types.go` 逐字段对齐（字段名与 JSON tag）
-- [ ] #10 有**负向测试**：试图给 `StreamEvent` 序列化错误、或给 `ToolDef` 序列化 `dangerous` 时**编译不过**
+- [x] #1 `crates/nexus-llm/src/types.rs` 落地 `Message` / `Role` / `ToolCall` / `ToolDef` / `ChatRequest` / `Usage` / `ChatResponse` / `StreamEvent` / `ModelDescriptor`
+- [x] #2 所有公共类型实现 `Debug`（workspace lint `missing_debug_implementations` 通过）
+- [x] #3 `ModelDescriptor` 的 `api_key` 用 `secrecy::SecretString` 承载；`Debug` 输出**不含**明文口令
+- [x] #4 `StreamEvent` 的错误字段**不参与序列化**（`json = "-"`）—— 内部错误绝不外泄给客户端
+- [x] #5 `Role` 是 `enum`（不是 `String`）—— 角色取值在类型上封闭
+- [x] #6 `ToolDef` 的**权威执行元数据**（`dangerous` / `replay_policy` / `source_identity` / `binding_version`）**不序列化** —— 那是控制面的东西，不是给模型看的
+- [x] #7 `nexus-llm` 的 `Cargo.toml` **不依赖** `nexus-repo`（§4.2 差异 1 + 参考架构 §2.4）
+- [x] #8 `cargo test -p nexus-llm` 通过；`cargo clippy -p nexus-llm --all-targets --locked -- -D warnings` 零告警；`cargo fmt --all --check` 通过
+- [x] #9 有**契约测试**：类型字段与参考实现的 `internal/llm/types.go` 逐字段对齐（字段名与 JSON tag）
+- [x] #10 有**负向测试**：试图给 `StreamEvent` 序列化错误、或给 `ToolDef` 序列化 `dangerous` 时**编译不过**
 
 ## 备注
 

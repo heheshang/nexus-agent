@@ -24,7 +24,7 @@ use nexus_core::error::{AppError, ErrorCode};
 use std::time::Duration;
 
 /// 模型网关的领域错误。
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum LlmError {
     /// 上游超时。
     ///
@@ -41,7 +41,12 @@ pub enum LlmError {
     },
 
     /// 上游返回错误状态。
-    #[error("上游返回错误")]
+    ///
+    /// # 消息里**必须带状态码**
+    ///
+    /// 502 与 503 的处置完全不同（一个可能是上游临时抖动，一个可能是过载）——
+    /// 消息里没有状态码，运维只能看到一句「上游返回错误」，等于没信息。
+    #[error("上游返回错误状态 {status}")]
     Upstream {
         /// HTTP 状态码。
         status: u16,
@@ -55,8 +60,14 @@ pub enum LlmError {
     Malformed(String),
 
     /// 传输层 IO 失败。
-    #[error("上游 IO 失败")]
-    UpstreamIo(#[from] std::io::Error),
+    ///
+    /// # 为什么存**字符串**而不是 `std::io::Error`
+    ///
+    /// `std::io::Error` **不实现 `Clone`** —— 而网关需要在重试的闭包里
+    /// 留一份原始错误（`AppError` 会丢掉上游状态码）。
+    /// 存 `Display` 文本即可：IO 错误只需要给人看，不需要结构化处理。
+    #[error("上游 IO 失败：{0}")]
+    UpstreamIo(String),
 
     /// 熔断打开 —— 该供应商已被熔断器拒绝。
     ///
@@ -93,13 +104,30 @@ pub enum LlmError {
     /// ⚠️ **取消不是失败** —— 它**不计入**熔断样本（AC #10 of NEX-18）。
     #[error("调用已取消")]
     Canceled,
+
+    /// 两边都失败 —— primary 与 fallback 都试过了。
+    ///
+    /// # 为什么要有这个变体
+    ///
+    /// 参考实现要求「两边都失败时，错误信息**同时含** primary 与 fallback 的信息」。
+    /// 如果只报其中一个，运维会以为另一个没配 —— 那是**误导**。
+    ///
+    /// 消息里带的是**供应商代号 + 各自的原因**，
+    /// **不**带 `base_url` / 响应体等内部细节（§2.6.5）。
+    #[error("主供应商与备用供应商均失败：{primary}；{fallback}")]
+    BothFailed {
+        /// 主供应商的失败信息。
+        primary: String,
+        /// 备用供应商的失败信息。
+        fallback: String,
+    },
 }
 
 impl LlmError {
     /// 映射到应用错误（带业务码）。
     ///
-    /// 按**值**消费 —— `UpstreamIo` 变体持有 `std::io::Error`，
-    /// 而内部原因要求 `'static` 生命周期（`AppError::cause` 是 `Arc<dyn Error + 'static>`）。
+    /// 按**值**消费 —— 内部原因要求 `'static` 生命周期
+    /// （`AppError::cause` 是 `Arc<dyn Error + 'static>`）。
     pub fn to_app_error(self) -> AppError {
         match self {
             // 超时 → **结果未知**，不能自动重试
@@ -115,8 +143,9 @@ impl LlmError {
             Self::Malformed(s) => {
                 AppError::new(ErrorCode::Internal, "系统内部错误").with_cause_msg(s)
             }
-            Self::UpstreamIo(e) => {
-                AppError::new(ErrorCode::ModelUnavailable, "模型暂不可用，请稍后再试").with_cause(e)
+            Self::UpstreamIo(msg) => {
+                AppError::new(ErrorCode::ModelUnavailable, "模型暂不可用，请稍后再试")
+                    .with_cause_msg(msg)
             }
             Self::CircuitOpen => {
                 AppError::new(ErrorCode::ModelUnavailable, "模型暂不可用，请稍后再试")
@@ -129,6 +158,12 @@ impl LlmError {
                 AppError::new(ErrorCode::ModelUnavailable, "模型暂不可用，请稍后再试")
             }
             Self::Canceled => AppError::new(ErrorCode::ServiceUnavailable, "请求已取消"),
+            Self::BothFailed { primary, fallback } => {
+                // 两边都失败 → 对外只说「暂不可用」，
+                // 双方明细进 `cause`（内部原因不外泄，§2.6.5）。
+                AppError::new(ErrorCode::ModelUnavailable, "模型暂不可用，请稍后再试")
+                    .with_cause_msg(format!("primary: {primary}; fallback: {fallback}"))
+            }
         }
     }
 

@@ -190,3 +190,102 @@ fn the_breaker_uses_a_standard_mutex_not_a_tokio_mutex() {
         "熔断器应显式使用 `std::sync::Mutex`"
     );
 }
+
+/// 网关的**装配顺序**必须与 `invariants.json` 的 `pipeline_order` 一致。
+///
+/// # 为什么这条值得断言
+///
+/// 装配顺序不是「风格问题」—— 每一层的位置都有理由：
+///
+/// - 预算**最先**：预算不足在调用前被拒，重试同样的请求同样会超。
+/// - 熔断**次之**：熔断在最外层，避免已知故障的供应商消耗配额。
+/// - fallback **最后**：回退是「换供应商重跑整条管道」。
+///
+/// 顺序写错不会编译报错，只会让行为悄悄不对。
+#[test]
+fn the_gateway_pipeline_order_matches_the_contract() {
+    let gateway_source = std::fs::read_to_string(crate_root().join("src/gateway.rs")).unwrap();
+
+    let budget_at = gateway_source
+        .find("bound_chat_request")
+        .expect("网关应调用预算裁剪");
+    let breaker_at = gateway_source.find(".allow()").expect("网关应做熔断判断");
+    let provider_at = gateway_source
+        .find("self.provider.chat")
+        .expect("网关应调用供应商");
+
+    assert!(
+        budget_at < breaker_at,
+        "预算裁剪必须在熔断判断**之前** —— 预算不足不是供应商的错，\
+         不该进熔断样本"
+    );
+    assert!(
+        breaker_at < provider_at,
+        "熔断判断必须在供应商调用**之前** —— 避免已知故障的供应商消耗配额"
+    );
+}
+
+/// 回退**必须**发生在「首事件之前」—— 类型上不允许首事件后回退。
+///
+/// # 为什么这条是**结构层**断言
+///
+/// 「流已开始不可回退」是**类型系统**保证的：
+/// [`StreamOutcome`] 区分 `FailedBeforeStart`（可回退）与 `Stream`（不可回退）。
+///
+/// 行为层测试验证「运行时确实拒绝了」，这条验证「**类型上**没有漏网的路径」——
+/// 比如有人给 `StreamOutcome` 加了第三个变体，或把 `FailedBeforeStart`
+/// 改成了能携带已发送事件的状态。
+#[test]
+fn the_stream_outcome_separates_before_start_from_after_start() {
+    let gateway_source = std::fs::read_to_string(crate_root().join("src/gateway.rs")).unwrap();
+
+    // 必须有「首事件前失败」这个变体 —— 它是回退的**唯一**入口。
+    assert!(
+        gateway_source.contains("FailedBeforeStart"),
+        "回退必须只从「首事件前失败」进入 —— 类型上区分两个阶段"
+    );
+    // 必须有「流已建立」这个变体。
+    assert!(
+        gateway_source.contains("StreamOutcome::Stream"),
+        "应存在「流已建立」的状态 —— 它之后不可回退"
+    );
+}
+
+/// `ToolDef` 的控制面字段**不得**进入上游请求体。
+///
+/// # 为什么这是**结构层**约束
+///
+/// `ToolDef` 自身的 `#[serde(skip)]` 挡不住**转换路径** ——
+/// 手写的字段映射不经过 serde。
+///
+/// `dangerous` / `replay_policy` / `source_identity` / `binding_version`
+/// 是给执行层看的信息，**绝不能发给模型** ——
+/// 把「这个工具是危险的」告诉模型，模型可能据此改变行为。
+#[test]
+fn the_tool_control_plane_fields_never_reach_the_upstream_request() {
+    let convert_source = std::fs::read_to_string(crate_root().join("src/convert.rs")).unwrap();
+
+    // ⚠️ 必须**剥离注释**再扫描 ——
+    // 文档注释里解释「`dangerous` 绝不发给模型」是**说明性文字**，
+    // 不是实际使用。`scripts/check-deps.sh` 规则 6b 用的是同样的手法。
+    let code: String = convert_source
+        .lines()
+        .map(|line| line.split_once("//").map_or(line, |(code, _)| code))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // 转换函数里不得引用控制面字段。
+    for forbidden in [
+        "dangerous",
+        "replay_policy",
+        "source_identity",
+        "binding_version",
+        "capability",
+    ] {
+        assert!(
+            !code.contains(forbidden),
+            "`{forbidden}` 是控制面字段，不得出现在上游请求的转换路径里 —— \
+             它只给执行层看，绝不能发给模型"
+        );
+    }
+}

@@ -49,13 +49,21 @@
 
 pub mod breaker;
 pub mod budget;
+pub mod convert;
 pub mod error;
+pub mod gateway;
+pub mod protocol;
+pub mod provider;
 pub mod retry;
+pub mod sse;
 pub mod types;
 
 pub use breaker::{BreakerConfig, BreakerRegistry, CircuitBreaker};
 pub use budget::{BoundedRequest, bound_chat_request};
+pub use convert::build_request_body;
 pub use error::LlmError;
+pub use gateway::{CallTarget, Gateway, GatewayConfig, StreamHandle, StreamOutcome};
+pub use provider::{OpenAiProvider, ProviderConfig};
 pub use retry::{CallOutcome, RetryConfig, RetryOutcome, is_retryable, record_outcome, retry_do};
 pub use types::{
     ChatRequest, ChatResponse, Message, ModelDescriptor, Role, StreamEvent, ToolCall, ToolDef,

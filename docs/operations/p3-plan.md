@@ -47,7 +47,7 @@
 | **NEX-16** | T-001 | `nexus-llm` 的领域类型与供应商描述符 | — | §2.3.2、§2.6.2、§4.2 差异 2 | ✅ 完成 |
 | **NEX-17** | T-002 | 上下文预算裁剪（`bound_chat_request`） | NEX-16 | §3.1.1、参考架构 §3.1.1 | ✅ 完成 |
 | **NEX-18** | T-003 | 重试（指数退避 + 抖动）与熔断器（含预热期） | NEX-16 | §2.6.3、参考架构 §3.1.2 / §3.1.3 | ✅ 完成 |
-| **NEX-19** | T-004 | OpenAI 兼容供应商客户端 + 网关装配 + 回退边界 | NEX-16/17/18 | §2.3.2、§3.3、参考架构 §3.1.5 | ⬜ Todo |
+| **NEX-19** | T-004 | OpenAI 兼容供应商客户端 + 网关装配 + 回退边界 | NEX-16/17/18 | §2.3.2、§3.3、参考架构 §3.1.5 | ✅ 完成 |
 | **NEX-20** | T-005 | P3 收口：架构文档同步 + 熔断粒度声明 + CI 门禁 | NEX-16..19 | §5.2、§5.3、§5.4、§6.1 | ⬜ Todo |
 
 依赖图：
@@ -130,10 +130,11 @@ pub enum ModelBackend {
 ## 验证方式
 
 ```bash
-# 门禁（八道）
+# 门禁（七道脚本 + 编译三连）
 bash scripts/check-lock.sh && bash scripts/check-deps.sh \
   && bash scripts/check-naming.sh && bash scripts/check-backlog.sh \
-  && bash scripts/check-specs.sh \
+  && bash scripts/check-specs.sh && bash scripts/check-rules.sh \
+  && bash scripts/check-docs.sh \
   && cargo fmt --all --check \
   && cargo clippy --workspace --all-targets --locked -- -D warnings \
   && cargo test --workspace --locked
