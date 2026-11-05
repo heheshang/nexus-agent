@@ -107,6 +107,10 @@ run(input, tools, cancel)
 
 ## DoR 判定
 
+> **判定日期**：2026-11-05（AI-SDLC S3）
+> **判定方式**：Stage A（确定性）+ Stage B（语义）逐项手工核对 —— 
+> 本仓库的 `pipeline-cli` 尚未构建（`dist/` 缺失），按 `ai-sdlc-dor-gate.mdc` §5 执行。
+
 七项门禁逐项判定（判据见 `.cursor/rules/ai-sdlc-dor-gate.mdc` §3）。
 
 ### #1 验收条件可二元测试

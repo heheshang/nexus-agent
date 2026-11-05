@@ -84,7 +84,7 @@ P4 **复用**下列码值，**不得新增**：
 「`nexus-agent` 内部用泛型 + AFIT 获得静态分发，只有在 `nexus-service` 装配层才 `dyn` 化」。
 
 **工具注册表**是**异构集合**（内置 / MCP / 用户自定义工具混在一起）——
-那是 §2.3.3 明确保留的 `dyn` 场景，所以 `InvokableTool` **必须** `dyn` 兼容。
+那是架构文档 §2.3.3 明确保留的 `dyn` 场景，所以 `InvokableTool` **必须** `dyn` 兼容。
 
 ### 2.4 失败语义必须显式建模
 
@@ -228,7 +228,7 @@ ingress mpsc（生产者只管 send）→ 唯一的序号分配 task → output 
 > `finish_reason`，而 `nexus-core` 的 `FinishReason` enum 目前只有
 > `Stop` / `ToolCalls` / `Length` —— **没有** `Canceled` 变体。
 >
-> P4 **不新增** `FinishReason` 变体（那是 §6.3 已定稿的事件契约）。
+> P4 **不新增** `FinishReason` 变体（那是架构文档 §6.3 已定稿的事件契约）。
 > 取消**通过** `done` + `FinishReason::Stop` 表达，
 > **取消的事实由指标与日志承载**（`RequestStatus::Canceled` 已是 P3 交付的形状）。
 >
@@ -318,13 +318,13 @@ P4 只通过 `ChatModel` trait 与模型交互，**看不到** `api_key`。
    （「**不要**让 `nexus-agent::host` 依赖 `nexus-llm` 的具体 `Gateway` 类型」），
    **不是**协议数据类型 —— 复用数据类型**不违反**该禁令。
 2. `scripts/check-deps.sh` 已允许 `nexus-agent → nexus-llm`，
-   D4 **不改动任何依赖方向铁律** —— 即**不触碰** §6.3 已定稿条款。
+   D4 **不改动任何依赖方向铁律** —— 即**不触碰**架构文档 §6.3 已定稿条款。
 3. **零类型重复** —— 自建一套 `Message` / `ToolDef` 会导致两套语义漂移。
 4. **不动已交付的 P3 代码** —— P3 的 19 条不变量路径不受影响。
 
 **反方论点与回应**（决策 rubric §4）：
 
-> 「§4.2 差异 2 明说 `nexus-model` 就是给**跨 crate 共享**的 DTO 用的，
+> 「架构文档 §4.2 差异 2 明说 `nexus-model` 就是给**跨 crate 共享**的 DTO 用的，
 > 而 `nexus-llm/src/types.rs` 的模块文档说「不需要 `nexus-model` 承载」，
 > 那是在**只有一个共享方**时的判断；P4 一引入第二个共享方，那个前提就**失效**了。
 > 类型下沉到 `nexus-model` 才是终局形态。」
@@ -367,7 +367,7 @@ P4 只通过 `ChatModel` trait 与模型交互，**看不到** `api_key`。
 | F2 | `FinishReason` 增加 `Canceled` 变体 | 当**协议层**（P5，`nexus-api` 的 SSE 桥接）需要**向前端区分**「用户取消」与「正常结束」时。**当前** P4 用 `done` + `Stop` 表达取消（§3.6），事实由指标与日志承载 |
 
 > **这两个后续任务尚未登记为 `backlog/tasks/` 里的独立任务** ——
-> 按 `ai-sdlc-decision-authority.mdc` §5「不扩大范围」，P4 的 Spec **只登记**，
+> 按 `.cursor/rules/ai-sdlc-decision-authority.mdc` §5「不扩大范围」，P4 的 Spec **只登记**，
 > **不**在本阶段创建任务文件（创建需要 S2 的完整产出物与 S3 的 DoR 判定）。
 > 登记本身需要人工授权。
 
