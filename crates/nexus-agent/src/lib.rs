@@ -48,11 +48,13 @@
 pub mod compaction;
 pub mod events;
 pub mod protocol;
+pub mod react;
 pub mod traits;
 
 pub use compaction::{CompactedHistory, compact_input_history};
-pub use events::{EventSink, EventSinkConfig, EventStream, Outcome};
+pub use events::{EventSink, EventSinkConfig, EventStream, Outcome as EventOutcome};
 pub use protocol::{ProtocolError, ProtocolSummary, validate_messages};
+pub use react::{Outcome, ReactConfig, ReactLoop};
 pub use traits::{ChatModel, InvokableTool};
 
 /// crate 版本号，便于运行时自检与日志标注。

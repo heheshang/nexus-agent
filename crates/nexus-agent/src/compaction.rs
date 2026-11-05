@@ -92,7 +92,16 @@ impl CompactedHistory {
 /// 口径与 `nexus_llm::budget::estimate_body_bytes` **一致** ——
 /// 两处必须同口径，否则「网关认为超预算、Agent 认为没超」
 /// 会让错误出现在**意想不到**的地方。
-fn estimate_body_bytes(messages: &[Message], tools: &[ToolDef]) -> usize {
+///
+/// # 为什么是 `pub`
+///
+/// 调用方需要**精确**知道一次请求占多少预算 ——
+///
+/// - 设定 `context_budget` 时要反推「够几轮」；
+/// - 观测「还剩多少预算」时要有同一个口径。
+///
+/// ⚠️ 口径**必须**与内部裁剪一致 —— 否则调用方算的和裁剪算的对不上。
+pub fn estimate_body_bytes(messages: &[Message], tools: &[ToolDef]) -> usize {
     let mut total = 0usize;
 
     for message in messages {
@@ -120,8 +129,21 @@ fn estimate_body_bytes(messages: &[Message], tools: &[ToolDef]) -> usize {
 }
 
 /// framing 开销。
-fn framing_bytes(message_count: usize, tool_count: usize) -> usize {
+/// 估算 framing 开销的字节数。
+///
+/// # 为什么是 `pub`
+///
+/// 与 [`estimate_body_bytes`] 同理 —— 调用方要用**同一个口径**
+/// 算「一次请求总共占多少预算」。
+pub fn framing_bytes(message_count: usize, tool_count: usize) -> usize {
     BASE_FRAMING + PER_MESSAGE_FRAMING * message_count + PER_TOOL_FRAMING * tool_count
+}
+
+/// 估算一次请求占用的**总**预算（请求体 + framing）。
+///
+/// 这是**调用方**设定 `context_budget` 时要对齐的口径。
+pub fn estimate_total_budget(messages: &[Message], tools: &[ToolDef]) -> usize {
+    estimate_body_bytes(messages, tools) + framing_bytes(messages.len(), tools.len())
 }
 
 /// 一个**轮**的边界。

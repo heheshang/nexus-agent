@@ -194,63 +194,67 @@
       "statement": "ReAct 循环跑通至少两轮：模型要求工具 → 工具执行 → 结果回灌 → 模型给出最终答案",
       "layer": "behavior",
       "verified_by": [
-        "crates/nexus-agent/tests/react_loop.rs::the_loop_runs_a_tool_turn_and_then_answers"
+        "crates/nexus-agent/tests/react.rs::the_loop_runs_at_least_two_rounds",
+        "crates/nexus-agent/tests/react.rs::the_tool_result_is_fed_back_to_the_model"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P4-I12",
       "statement": "迭代上限生效：超出 max_iterations 时以 MaxIteration（30002）终止",
       "layer": "behavior",
       "verified_by": [
-        "crates/nexus-agent/tests/react_loop.rs::the_iteration_limit_stops_the_loop_with_max_iteration"
+        "crates/nexus-agent/tests/react.rs::the_iteration_limit_terminates_the_loop"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P4-I13",
       "statement": "单步超时生效：单次模型调用超时以 ModelTimeout（50002）终止",
       "layer": "behavior",
       "verified_by": [
-        "crates/nexus-agent/tests/react_loop.rs::the_per_step_timeout_stops_the_loop"
+        "crates/nexus-agent/tests/react.rs::the_step_timeout_terminates_the_loop",
+        "crates/nexus-agent/tests/react.rs::the_step_timeout_fires_before_the_total_timeout"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P4-I14",
       "statement": "总超时生效：整个运行超时以 ModelTimeout（50002）终止",
       "layer": "behavior",
       "verified_by": [
-        "crates/nexus-agent/tests/react_loop.rs::the_overall_timeout_stops_the_loop"
+        "crates/nexus-agent/tests/react.rs::the_total_timeout_terminates_the_loop"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P4-I15",
       "statement": "工具失败**结构化回灌**且**不终止**循环 —— 错误作为 tool 角色消息回灌，模型仍能给出答案",
       "layer": "behavior",
       "verified_by": [
-        "crates/nexus-agent/tests/react_loop.rs::a_failing_tool_is_reported_back_to_the_model_without_stopping_the_loop"
+        "crates/nexus-agent/tests/react.rs::a_tool_failure_is_fed_back_without_terminating_the_loop",
+        "crates/nexus-agent/tests/react.rs::a_tool_failure_is_fed_back_as_a_structured_observation",
+        "crates/nexus-agent/tests/react.rs::the_tool_error_content_has_the_documented_shape"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P4-I16",
       "statement": "工具输出是**数据**不是指令 —— 回灌时是 tool 角色消息，不是 assistant 消息",
       "layer": "behavior",
       "verified_by": [
-        "crates/nexus-agent/tests/react_loop.rs::tool_output_is_replayed_as_a_tool_message_not_an_assistant_message"
+        "crates/nexus-agent/tests/react.rs::tool_output_is_fed_back_as_a_tool_role_message"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P4-I17",
       "statement": "工具并发限流生效 —— 同一轮内同时执行的工具数不超过上限",
       "layer": "behavior",
       "verified_by": [
-        "crates/nexus-agent/tests/react_loop.rs::the_tool_concurrency_limit_is_enforced"
+        "crates/nexus-agent/tests/react.rs::concurrent_tool_execution_respects_the_limit"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P4-I18",
@@ -291,18 +295,18 @@
       "statement": "取消的终态是 done 而非 error —— 取消不是失败",
       "layer": "behavior",
       "verified_by": [
-        "crates/nexus-agent/tests/react_loop.rs::a_cancelled_run_ends_with_done_not_error"
+        "crates/nexus-agent/tests/react.rs::cancellation_is_not_a_failure"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P4-I22",
       "statement": "先固化错误再取消 —— 供应商失败不会被 cancel 覆盖成「用户取消」",
       "layer": "behavior",
       "verified_by": [
-        "crates/nexus-agent/tests/react_loop.rs::the_original_error_is_preserved_before_cancelling"
+        "crates/nexus-agent/tests/react.rs::a_provider_failure_is_not_masked_by_cancellation"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P4-I23",
@@ -327,9 +331,11 @@
       "statement": "工具输出超长被截断 —— 一个返回巨量输出的工具不会撑爆上下文预算",
       "layer": "behavior",
       "verified_by": [
-        "crates/nexus-agent/src/tools.rs::an_oversized_tool_output_is_truncated"
+        "crates/nexus-agent/tests/react.rs::a_huge_tool_output_is_truncated",
+        "crates/nexus-agent/tests/react.rs::the_truncation_respects_utf8_boundaries",
+        "crates/nexus-agent/tests/react.rs::a_short_output_is_not_truncated"
       ],
-      "status": "planned"
+      "status": "verified"
     }
   ],
   "pipeline_order": [

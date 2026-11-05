@@ -1,7 +1,7 @@
 ---
 id: NEX-29
 title: "feat(agent): 落地 ReAct 循环本体"
-status: To Do
+status: Done
 assignee: []
 labels: [agent, react]
 priority: medium
@@ -92,18 +92,18 @@ run(input, tools, cancel)
 
 ## Acceptance Criteria
 
-- [ ] #1 `crates/nexus-agent/src/react.rs` 实现 ReAct 循环，管道顺序为：配对校验 → 裁剪 → 模型调用 → 输出校验 → 工具执行 → 结果回灌
-- [ ] #2 循环跑通**至少两轮**：模型要求工具 → 工具执行 → 结果回灌 → 模型给出最终答案
-- [ ] #3 **三个安全阀**全部生效：最大迭代（`MaxIteration` 30002）、单步超时（`ModelTimeout` 50002）、总超时（`ModelTimeout` 50002）
-- [ ] #4 工具失败**结构化回灌**为 `tool` 角色消息（形状 `{"error": ..., "message": ...}`），且**不终止**循环 —— 模型仍能给出答案
-- [ ] #5 工具输出回灌时是 **`tool` 角色**消息，**不是** `assistant` 消息 —— 工具输出是数据，不是指令
-- [ ] #6 工具并发用 `Semaphore` 限流，同时执行的工具数**不超过**上限
-- [ ] #7 工具输出**超长被截断**，且截断保持 UTF-8 边界
-- [ ] #8 取消的终态是 `done`（**不是** `error`）—— 取消 ≠ 失败
-- [ ] #9 **先固化错误再取消** —— 供应商失败不会被 `cancel` 覆盖成「用户取消」
-- [ ] #10 迭代上限 / 超时 / 工具并发上限**全部由调用方传入**，`nexus-agent` **不内置**隐式默认值
-- [ ] #11 裁剪在**每步**都重跑（不是只在第一步）
-- [ ] #12 `cargo fmt --all --check` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo test --workspace --locked` 通过
+- [x] #1 `crates/nexus-agent/src/react.rs` 实现 ReAct 循环，管道顺序为：配对校验 → 裁剪 → 模型调用 → 输出校验 → 工具执行 → 结果回灌
+- [x] #2 循环跑通**至少两轮**：模型要求工具 → 工具执行 → 结果回灌 → 模型给出最终答案
+- [x] #3 **三个安全阀**全部生效：最大迭代（`MaxIteration` 30002）、单步超时（`ModelTimeout` 50002）、总超时（`ModelTimeout` 50002）
+- [x] #4 工具失败**结构化回灌**为 `tool` 角色消息（形状 `{"error": ..., "message": ...}`），且**不终止**循环 —— 模型仍能给出答案
+- [x] #5 工具输出回灌时是 **`tool` 角色**消息，**不是** `assistant` 消息 —— 工具输出是数据，不是指令
+- [x] #6 工具并发用 `Semaphore` 限流，同时执行的工具数**不超过**上限
+- [x] #7 工具输出**超长被截断**，且截断保持 UTF-8 边界
+- [x] #8 取消的终态是 `done`（**不是** `error`）—— 取消 ≠ 失败
+- [x] #9 **先固化错误再取消** —— 供应商失败不会被 `cancel` 覆盖成「用户取消」
+- [x] #10 迭代上限 / 超时 / 工具并发上限**全部由调用方传入**，`nexus-agent` **不内置**隐式默认值
+- [x] #11 裁剪在**每步**都重跑（不是只在第一步）
+- [x] #12 `cargo fmt --all --check` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo test --workspace --locked` 通过
 
 ## DoR 判定
 
@@ -184,4 +184,101 @@ crate 依赖方向、对外响应形状。
 
 ## 实现过程中的发现
 
-（待补）
+### 设计选择 —— 终态事件由**调用方**发
+
+`ReactLoop::run` **只**返回终态分类，**不**发终态事件。
+
+理由：「先固化错误，再取消」的顺序要求终态事件的**发送**发生在
+错误固化**之后**，而发送需要调用方掌握取消令牌 —— 如果循环内部自己发，
+顺序就拧了。
+
+调用方的顺序：
+1. `run()` → 拿到 `Outcome`；
+2. 按 `Outcome` 发终态事件（`done` / `error`）；
+3. **然后**取消上游工作。
+
+### 发现 1 —— `Outcome` 不能存 `AppError`
+
+`AppError` **不实现** `Clone` / `Eq` —— 而终态需要能被**比较**（测试要断言）。
+
+改成存**码** + **消息**：
+
+```rust
+Outcome::Failed { code: ErrorCode, message: String, iterations: usize }
+```
+
+### 发现 2 —— 工具并发限流的测试要**共享计数器**
+
+第一版的工具各自持有计数器，但工具是 `Arc<dyn InvokableTool>` ——
+**拿不到具体类型**，读不到峰值。
+
+改成所有工具共享一个 `Arc<AtomicUsize>` 峰值计数器。
+
+另外，第一版的测试**跑了两遍**循环（第一遍用 `dyn` 读不到峰值，白跑）。
+删掉第一遍。
+
+### 发现 3 —— 预算必须**精确**算，不能硬编码
+
+第一版硬编码 `cfg.context_budget = 200` —— 结果**全部**红。
+
+根因：预算的口径是 `body + framing`，而 `framing` 依赖**消息条数**与
+**工具定义数**。硬编码的魔数对不上真实内容。
+
+而且 —— 第一轮就超预算时，模型**根本没被调用**（在构造请求阶段就失败了），
+所以「模型被调用几次」这个断言本身就是错的。
+
+修法：
+1. 把 `estimate_body_bytes` / `framing_bytes` **提升为 `pub`** ——
+   调用方需要用**同一个口径**算预算；
+2. 测试用 `estimate_total_budget(&expected_history, &tool_defs)` 算出精确预算。
+
+> **顺带暴露了一个真实的设计缺口**：
+> `estimate_body_bytes` 与 `framing_bytes` 之前是**私有**的 ——
+> 外部根本无法知道「一次请求占多少预算」。
+> 这不是测试的问题，是**API 的问题**。已修。
+
+### 发现 4 —— 「裁剪每步都跑」的证明方式是**间接**的
+
+第一版断言「模型被调用两次」—— 但实际是**一次**：第二步在**构造请求**时
+就超预算了，压根没走到模型调用。
+
+这其实**更**是证据：如果裁剪只在第一步跑，第二步会用**未裁剪**的历史
+去调模型 —— 就会被调用两次。
+
+所以正确的断言是「模型只被调用一次」+「报 `BudgetExceeded`」。
+
+### 发现 5 —— 「裁剪确实淘汰了东西」需要**单独**一个测试
+
+「裁剪每步都跑」和「裁剪确实淘汰」是两件事。
+
+而且要测淘汰，第一轮必须**大到**超预算 —— 两轮都很短的话，
+step 1 的总量反而比 step 2 的保留集还小，那就不触发淘汰。
+
+另外，保留集的**最坏情况**要**精确**重建（assistant 消息**带工具调用**、
+tool 结果是**真实输出**）—— 否则第二步还是会超预算。
+
+### 发现 6 —— 模块文档里的 ASCII 图会被当成 **doctest**
+
+`//! ```` 里的 `→` `←` `├─` 被 rustdoc 当成 Rust 代码编译 → 编译错误。
+
+改成 ` ```text ` —— 明确标记为**纯文本**。
+
+### 门禁自身的防伪验证
+
+六条关键断言都用**注入故障**验证过会红：
+
+| 注入 | 结果 |
+|---|---|
+| 工具失败**直接终止**循环 | `a_tool_failure_is_fed_back_as_a_structured_observation` FAILED ✓ |
+| 工具结果用 **`assistant` 角色**回灌 | 10 个测试同时红 ✓ |
+| 迭代上限**不生效** | `the_iteration_limit_terminates_the_loop` FAILED ✓ |
+| 取消被**当成失败** | `cancellation_is_not_a_failure` FAILED ✓ |
+| 工具并发限流**失效** | `concurrent_tool_execution_respects_the_limit` FAILED ✓ |
+| **跳过**协议校验与裁剪 | 3 个测试同时红 ✓ |
+
+### 验证结果
+
+- `cargo test -p nexus-agent`：65 个测试（26 单元 + 5 结构层 + 14 事件 + 20 ReAct）全绿
+- `cargo test --workspace --locked`：448 通过 / 0 失败（原 428）
+- `cargo fmt --all --check` 通过
+- `cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警
