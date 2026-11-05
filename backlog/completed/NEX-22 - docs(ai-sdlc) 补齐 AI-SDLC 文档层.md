@@ -1,7 +1,7 @@
 ---
 id: NEX-22
 title: "docs(ai-sdlc): 补齐 AI-SDLC 文档层"
-status: In Progress
+status: Done
 assignee: []
 labels: [ai-sdlc, governance, docs]
 priority: medium
@@ -53,7 +53,7 @@ NEX-21 把 AI-SDLC 的**规范**补齐到了 `.cursor/rules/`（判据层），�
 | 没有度量手册 | 五类指标只列了维度，**口径与分母**没定义 |
 | 没有适配器清单 | 外部系统边界只给了契约表，没给**本仓库实际接了哪些**、凭据怎么走、失败怎么翻译 |
 | 没有术语表 | 上游术语（enforcement level / handoff contract / conformance level…）在规则里直接用英文，中文读者需要自己猜 |
-| `NEX-21` 已提交但任务仍停在 `tasks/` 且 `status: In Progress` | backlog 与 git 历史不一致 —— 违反 `ai-sdlc-artifacts.mdc` §6 的归档纪律 |
+| `NEX-21` 已提交但任务仍停在 `tasks/` 且 `status: Done` | backlog 与 git 历史不一致 —— 违反 `ai-sdlc-artifacts.mdc` §6 的归档纪律 |
 
 **目标**：把文档层补齐到与规则层**对称** —— 判据在 `.cursor/rules/`，解释与覆盖情况在 `docs/`，
 两者不矛盾、互相可解析。
@@ -198,7 +198,7 @@ NEX-21 交付的是**判据**（每条规则的阶段、产出物、退出条件
 
 ### 5. `git mv` 归档时，`status` 要**同时**改
 
-NEX-21 已提交（`9643972`）但任务仍停在 `backlog/tasks/` 且 `status: In Progress` ——
+NEX-21 已提交（`9643972`）但任务仍停在 `backlog/tasks/` 且 `status: Done` ——
 `check-backlog.sh` 的第 2 项只检查 `completed/` 下的任务，
 **查不出「任务做完了却没归档」**。
 

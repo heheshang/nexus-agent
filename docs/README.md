@@ -38,6 +38,7 @@
 | [`ai-sdlc/dor-playbook.md`](ai-sdlc/dor-playbook.md) | DoR 门禁的执行步骤、Stage A 检查清单、判定记录模板、澄清回路 |
 | [`ai-sdlc/review-playbook.md`](ai-sdlc/review-playbook.md) | 三类 remit 检查项、评审者独立性、迭代上限、评审结论模板 |
 | [`ai-sdlc/metrics-playbook.md`](ai-sdlc/metrics-playbook.md) | 五类指标的分母与口径、快照模板、校准流程、审计留痕 |
+| [`ai-sdlc/metrics-snapshot-2026-11.md`](ai-sdlc/metrics-snapshot-2026-11.md) | 度量快照 · 2026-11 —— 五类指标的实际口径与待校准项 |
 | [`ai-sdlc/adapter-inventory.md`](ai-sdlc/adapter-inventory.md) | 外部系统清单、凭据来源、失败翻译规则、未接入项 |
 
 ---

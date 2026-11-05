@@ -16,6 +16,7 @@
 | **遇到不认识的术语** | `glossary.md`（术语表） |
 | **接外部系统 / 配凭据** | `adapter-inventory.md`（适配器清单） |
 | **做周期复盘 / 调流程参数** | `metrics-playbook.md`（度量与校准手册） |
+| **看本周期实际测出来的数** | `metrics-snapshot-2026-11.md`（度量快照） |
 
 ---
 
@@ -29,6 +30,7 @@
 | [`review-playbook.md`](review-playbook.md) | 三类 remit 的检查项、评审者独立性、迭代上限、结论模板、provenance 示例 |
 | [`metrics-playbook.md`](metrics-playbook.md) | 五类指标的**分母与口径**、快照模板、校准流程、审计留痕 |
 | [`adapter-inventory.md`](adapter-inventory.md) | 本仓库实际接触的外部系统、凭据来源、失败翻译、未接入项 |
+| [`metrics-snapshot-2026-11.md`](metrics-snapshot-2026-11.md) | **度量快照** · 2026-11 —— 五类指标的实际口径、观察、判断与已登记的待校准项 |
 
 ---
 
