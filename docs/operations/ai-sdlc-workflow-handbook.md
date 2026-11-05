@@ -188,6 +188,7 @@ AI-SDLC 叫自己「决策引擎」，因为**决策权始终在人手里**。
 | Tier 2 · Spec | `bash scripts/check-specs.sh` | 三件套缺失；`tasks.md` ↔ backlog 漂移；契约引用不存在的测试；错误码白名单漂移 |
 | Tier 3 · Task | `bash scripts/check-backlog.sh` | 任务重复归档；完成态未标记 |
 | 规则层 | `bash scripts/check-rules.sh` | 规则引用不存在的路径；`AGENTS.md` 清单漂移 |
+| 文档层 | `bash scripts/check-docs.sh` | 文档断链；`docs/README.md` 索引漂移；覆盖矩阵引用不存在的路径 |
 
 **注意 `check-specs.sh` 规则 3 的意义**：
 `contracts/invariants.json` 里每条不变量都指着一个**真实的测试名**，
@@ -195,6 +196,8 @@ AI-SDLC 叫自己「决策引擎」，因为**决策权始终在人手里**。
 这是「防伪」—— 声称「某测试验证了这条不变量」但那个测试根本不存在时，
 契约就是**空头支票**。规则文件里如果只有散文判据，同样会退化成空头支票 ——
 这就是 `check-rules.sh` 存在的理由。
+**文档层同理** —— 索引里列一个不存在的文档，读者会以为读过它了。
+这就是 `check-docs.sh` 存在的理由。
 
 **未接入管道的事实要记住**：AI-SDLC 的 DoR 由 `cli-dor-check.mjs` 执行（Stage A 脚本 + Stage B LLM）。
 本仓库是**手工执行**（代理逐项核对 + 判定记录落到任务文件）。
@@ -215,6 +218,8 @@ AI-SDLC 叫自己「决策引擎」，因为**决策权始终在人手里**。
 - [ ] 新代码落在三层验证的哪一层？
 - [ ] 提交前六道门禁绿了吗？任务号真实存在吗？
 
+> 门禁现在是**七道**（新增 `bash scripts/check-docs.sh` 文档层一致性）。
+
 ---
 
 ## 相关文件
@@ -225,6 +230,14 @@ AI-SDLC 叫自己「决策引擎」，因为**决策权始终在人手里**。
 | `.cursor/rules/ai-sdlc-dor-gate.mdc` | 七项门禁 |
 | `.cursor/rules/ai-sdlc-decision-authority.mdc` | 决策三分类与升级 |
 | `.cursor/rules/ai-sdlc-quality-gates.mdc` | 门禁分级与评审 |
+| `docs/README.md` | `docs/` 文档总索引 |
+| `docs/ai-sdlc/README.md` | AI-SDLC 文档导航（操作手册入口） |
+| `docs/ai-sdlc/coverage-matrix.md` | 上游 AI-SDLC 规范逐条适配状态 |
+| `docs/ai-sdlc/dor-playbook.md` | DoR 门禁操作手册 |
+| `docs/ai-sdlc/review-playbook.md` | 评审操作手册 |
+| `docs/ai-sdlc/metrics-playbook.md` | 度量与校准操作手册 |
+| `docs/ai-sdlc/adapter-inventory.md` | 外部系统与凭据清单 |
+| `docs/ai-sdlc/glossary.md` | 术语表 |
 | `docs/specs/README.md` | Spec 层（Tier 2）产物说明 |
 | `docs/rfcs/README.md` | RFC 层（Tier 1）产物说明 |
 | `AGENTS.md` | 常驻指令入口 |

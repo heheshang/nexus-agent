@@ -103,6 +103,16 @@ jobs:
       - name: 校验规则文件一致性
         run: bash scripts/check-rules.sh
 
+      # 文档层一致性：docs/ 内的相对链接可解析、docs/README.md 索引覆盖全部文档、
+      # 覆盖矩阵引用的仓库路径存在。
+      #
+      # 为什么必须 CI 强制：**指向具体产物的引用必须被机器校验存在性。**
+      # 规则文件引用了不存在的脚本，会给出一条无法执行的判据；
+      # 文档索引列了不存在的文档，读者会以为读过它了。
+      # 两者都是「看起来覆盖了，实际没有」的静默失效。
+      - name: 校验文档层一致性
+        run: bash scripts/check-docs.sh
+
       - name: cargo fmt --check
         run: cargo fmt --all --check
 

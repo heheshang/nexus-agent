@@ -65,12 +65,13 @@ Request（PR / 部署）
 | 4 | `bash scripts/check-backlog.sh` | 任务重复归档；完成态未标记 |
 | 5 | `bash scripts/check-specs.sh` | Spec 三件套缺失；`tasks.md` 与 backlog 漂移；契约引用不存在的测试；错误码白名单漂移 |
 | 6 | `bash scripts/check-rules.sh` | 规则文件 frontmatter 非法；引用的仓库路径不存在；规则清单漂移 |
-| 7 | `cargo fmt --all --check` | 格式化 |
-| 8 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | 静态检查有任何告警 |
-| 9 | `cargo test --workspace --locked` | 全量测试 |
-| 10 | 集成测试数量断言（CI 内联） | **集成测试被静默跳过** —— 「CI 全绿」是假象 |
+| 7 | `bash scripts/check-docs.sh` | 文档断链；`docs/README.md` 索引漂移；覆盖矩阵引用不存在的路径 |
+| 8 | `cargo fmt --all --check` | 格式化 |
+| 9 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | 静态检查有任何告警 |
+| 10 | `cargo test --workspace --locked` | 全量测试 |
+| 11 | 集成测试数量断言（CI 内联） | **集成测试被静默跳过** —— 「CI 全绿」是假象 |
 
-> 第 9 条是本仓库特有的 `hard-mandatory`：集成测试的判据是 `DATABASE_URL` 是否存在，
+> 第 10 条是本仓库特有的 `hard-mandatory`：集成测试的判据是 `DATABASE_URL` 是否存在，
 > 不存在时**全部跳过**但在摘要里显示 `passed`。CI 额外解析测试输出，
 > 断言每个集成测试套件的**实际运行数量**达到预期下限。
 

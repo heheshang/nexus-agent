@@ -1,7 +1,7 @@
 ---
 id: NEX-21
 title: "chore(rules): 补齐 AI-SDLC 全流程规范"
-status: In Progress
+status: Done
 assignee: []
 labels: [ai-sdlc, governance, docs]
 priority: high

@@ -40,7 +40,7 @@ alwaysApply: true
 | **S1** | 分层判定 | 诉求已记录 | 层级结论（RFC / Spec / Task） | 层级已判定且**落在 Task 层** | 无法判定 → 升级（`ai-sdlc-decision-authority.mdc` §4） |
 | **S2** | 产出物编写 | 层级已判定 | RFC / `spec.md`+`plan.md`+`tasks.md`+`contracts/` / 任务文件 | 产出物落盘且**引用可解析** | 产出物不全 → 补齐，不得跳到 S3 |
 | **S3** | DoR 门禁 | 产出物落盘 | DoR 判定（pass / needs-clarification / blocked） | 七项门禁**全部通过** | 不通过 → 退回 S2 澄清；**不得开工** |
-| **S4** | 实现 | DoR 通过 | 代码 + 测试 + 提交 | 六道门禁**本地全绿** | 门禁红 → 修复；`hard-mandatory` 不可覆盖 |
+| **S4** | 实现 | DoR 通过 | 代码 + 测试 + 提交 | 七道门禁**本地全绿** | 门禁红 → 修复；`hard-mandatory` 不可覆盖 |
 | **S5** | 三层验证 | 实现完成 | 类型层 / 结构层 / 行为层证据 | 每条新代码**至少落在一层** | 无覆盖 → 补测试，不得进入 S6 |
 | **S6** | 评审 | S5 通过 | 评审结论（approved / changes-requested） | 评审门禁通过（含 provenance + 评审人数） | changes-requested → 回到 S4，最多迭代 2 轮 |
 | **S7** | 合并与交付 | 评审通过 | 提交历史 + PR + 任务归档 | 提交在 `main` 上，任务移入 `backlog/completed/` | 冲突 → 手工解；**不得自动解** |
@@ -103,6 +103,9 @@ AI-SDLC 是**决策引擎**，采用三层产出模型（`~/.claude/plugins/mark
 **产出物层的门禁由 `bash scripts/check-backlog.sh`（Task 层）与
 `bash scripts/check-specs.sh`（Spec 层）校验**。
 
+**文档层的一致性由 `bash scripts/check-docs.sh` 校验**（相对链接可解析、
+`docs/README.md` 索引覆盖全部文档、覆盖矩阵引用的仓库路径存在）。
+
 ---
 
 ## 5. 不可协商项（摘要）
@@ -124,8 +127,12 @@ AI-SDLC 是**决策引擎**，采用三层产出模型（`~/.claude/plugins/mark
 | 文件 | 作用 |
 |---|---|
 | `AGENTS.md` | 项目级代理指令入口 |
+| `docs/README.md` | `docs/` 文档总索引 |
 | `docs/operations/ai-sdlc-workflow-handbook.md` | 人类可读的流程手册（叙事版） |
+| `docs/ai-sdlc/README.md` | AI-SDLC 文档导航（覆盖矩阵 / 术语表 / 各操作手册） |
+| `docs/ai-sdlc/coverage-matrix.md` | 上游 AI-SDLC 规范逐条适配状态 |
 | `backlog/tasks/` | DoR 任务载体（Task 层产出） |
 | `backlog/README.md` | 任务文件格式与生命周期 |
 | `scripts/check-rules.sh` | 规则文件一致性校验 |
+| `scripts/check-docs.sh` | 文档层一致性校验 |
 | `docs/architecture/2026-11-04-nexusagent-rust-architecture-design.md` | 架构与契约的**唯一权威** |

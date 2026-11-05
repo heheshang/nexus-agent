@@ -35,7 +35,7 @@
 | S1 | 分层判定 | 层级已判定且落在 Task 层 |
 | S2 | 产出物编写 | 产出物落盘且引用可解析 |
 | S3 | DoR 门禁 | 七项门禁全部通过 |
-| S4 | 实现 | 六道门禁本地全绿 |
+| S4 | 实现 | 七道门禁本地全绿 |
 | S5 | 三层验证 | 每条新代码至少落在一层 |
 | S6 | 评审 | 评审门禁通过（含 provenance 与评审人数） |
 | S7 | 合并与交付 | 提交在 `main` 上，任务移入 `backlog/completed/` |
@@ -74,6 +74,7 @@ bash scripts/check-naming.sh      # 标识符不得含中文
 bash scripts/check-backlog.sh     # backlog 组织纪律
 bash scripts/check-specs.sh       # Spec 层组织纪律
 bash scripts/check-rules.sh       # 规则文件一致性
+bash scripts/check-docs.sh        # 文档层一致性
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
@@ -116,7 +117,11 @@ feat(core): 增加取消语义类型状态 (NEX-101)
 
 | 文件 | 作用 |
 |---|---|
+| `docs/README.md` | `docs/` 文档总索引 |
 | `docs/operations/ai-sdlc-workflow-handbook.md` | 人类可读的流程手册 |
+| `docs/ai-sdlc/README.md` | AI-SDLC 文档导航（覆盖矩阵 / 术语表 / DoR / 评审 / 度量 / 适配器手册） |
+| `docs/ai-sdlc/coverage-matrix.md` | 上游 AI-SDLC 规范逐条适配状态 |
 | `docs/architecture/2026-11-04-nexusagent-rust-architecture-design.md` | 架构与契约的**唯一权威** |
 | `backlog/README.md` | 任务文件格式与生命周期 |
 | `scripts/check-rules.sh` | 规则文件一致性校验 |
+| `scripts/check-docs.sh` | 文档层一致性校验 |

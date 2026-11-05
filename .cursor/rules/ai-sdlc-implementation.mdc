@@ -94,6 +94,7 @@ bash scripts/check-naming.sh      # 标识符不得含中文
 bash scripts/check-backlog.sh     # backlog 组织纪律
 bash scripts/check-specs.sh       # Spec 层组织纪律
 bash scripts/check-rules.sh       # 规则文件一致性
+bash scripts/check-docs.sh        # 文档层一致性
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked

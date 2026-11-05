@@ -7,7 +7,7 @@
 #   lint     clippy
 #   test     跑测试
 #   lock     更新依赖锁定
-#   audit    检查依赖树纪律（lock + deps + naming + backlog + rules）
+#   audit    检查依赖树纪律（lock + deps + naming + backlog + specs + rules + docs）
 #   build    release 构建
 #   run      以 debug 模式运行 CLI
 set -euo pipefail
@@ -29,7 +29,8 @@ case "$cmd" in
             && bash scripts/check-naming.sh \
             && bash scripts/check-backlog.sh \
             && bash scripts/check-specs.sh \
-            && bash scripts/check-rules.sh ;;
+            && bash scripts/check-rules.sh \
+            && bash scripts/check-docs.sh ;;
     build)  cargo build --workspace --release --locked "$@" ;;
     run)    cargo run -p nexus-cli -- "$@" ;;
     *)      echo "未知命令：$cmd"; exit 1 ;;
