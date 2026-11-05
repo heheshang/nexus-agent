@@ -52,6 +52,23 @@ pub const FRAME_DELIMITER: &[u8] = b"\n\n";
 /// 代理 / 网关可能改写换行 —— 解码器要**容忍**，但**编码器不产出**。
 const FRAME_DELIMITER_CRLF: &[u8] = b"\r\n\r\n";
 
+/// 帧内容的大小上限（**默认** 1 MiB）。
+///
+/// # 为什么需要上限
+///
+/// `FrameDecoder` 是**增量式**的 —— 喂进来的字节会留在缓冲区里，
+/// 直到凑出分隔符为止。
+///
+/// 如果上游**永远不送分隔符**（流损坏、代理截断，或**恶意**输入），
+/// 缓冲区就会**一直增长**，直到进程内存耗尽。
+///
+/// 1 MiB 是个**宽松**的上限 —— 真实的 SSE 帧（事件名 + JSON 负载）
+/// 通常是**几百字节**量级。1 MiB 足以容纳任何合理负载，
+/// 同时把「无界增长」变成「有界增长」。
+///
+/// ⚠️ 上限约束的是**帧内容**（**不含**分隔符）的字节数。
+pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
+
 /// 帧解析的错误。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum FrameError {
@@ -61,6 +78,15 @@ pub enum FrameError {
     /// 负载不是合法 JSON。
     #[error("帧负载不是合法 JSON: {0}")]
     InvalidPayload(String),
+    /// 帧内容**超过**大小上限。
+    ///
+    /// ⚠️ **不携带缓冲内容** —— 只带 `limit` 与 `actual` 两个**数字**。
+    ///
+    /// 上游字节是**不可信输入**；把它写进 `Display` 就等于
+    /// 让它进入日志 / 响应体。`actual` 是**长度**，
+    /// 不是**内容** —— 长度不泄露任何负载。
+    #[error("帧大小超过上限：{actual} 字节 > 上限 {limit} 字节")]
+    FrameTooLarge { limit: usize, actual: usize },
 }
 
 /// 解析后的帧。
@@ -117,7 +143,7 @@ pub fn ping() -> Vec<u8> {
 ///
 /// `push` 返回其中所有**完整**的帧；
 /// **不完整的尾部会被缓冲**，等待后续数据。
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct FrameDecoder {
     buf: Vec<u8>,
     /// 已经扫描过、确认**不含分隔符起点**的字节数。
@@ -125,25 +151,94 @@ pub struct FrameDecoder {
     /// 逐字节喂入时，若每次都从 0 重扫，退化是 O(n²)。
     /// 下一次只需从「可能跨次到达的分隔符起点」重扫。
     scanned: usize,
+    /// 帧内容的大小上限（字节）—— 不含分隔符。
+    limit: usize,
+    /// 上限已触发时的错误 —— 解码器进入**不可恢复**状态。
+    ///
+    /// 一旦超限就**无法重新同步**（不知道下一帧从哪开始），
+    /// 所以后续的 `push` **直接**返回同一个错误，**不再缓冲**。
+    over_limit: Option<FrameError>,
+}
+
+impl Default for FrameDecoder {
+    /// ⚠️ **手写** `Default` —— 不能 derive。
+    ///
+    /// `limit` 的默认值必须是 [`MAX_FRAME_BYTES`]，
+    /// 而 `usize` 的 derive 默认是 `0` —— 那会让解码器**拒绝一切**非空帧。
+    fn default() -> Self {
+        Self {
+            buf: Vec::new(),
+            scanned: 0,
+            limit: MAX_FRAME_BYTES,
+            over_limit: None,
+        }
+    }
 }
 
 impl FrameDecoder {
-    /// 创建一个空解码器。
+    /// 创建一个空解码器 —— 帧大小上限为 [`MAX_FRAME_BYTES`]。
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// 创建一个**自定义帧大小上限**的解码器。
+    ///
+    /// # 参数
+    ///
+    /// `limit` —— 单帧**内容**的字节上限（**不含**分隔符）。
+    ///
+    /// # 为什么需要它
+    ///
+    /// 默认值 1 MiB 对绝大多数场景**足够宽松**；
+    /// 但「可配置」让上限成为**调用方的选择**而不是**写死的数字** ——
+    /// 不同上游的帧大小差别很大。
+    ///
+    /// ⚠️ 上限约束的是**帧内容**，**不是**缓冲区总长 ——
+    /// 一次喂入里可以包含**多个**帧，每个帧各自受上限约束。
+    pub fn with_limit(limit: usize) -> Self {
+        Self {
+            limit,
+            ..Self::default()
+        }
     }
 
     /// 喂入一段字节，返回其中所有**完整**的帧。
     ///
     /// # 错误
     ///
-    /// 遇到**畸形帧**（既无 `event` 又无 `data`）时返回
-    /// [`FrameError::MalformedFrame`]。
+    /// - 遇到**畸形帧**（既无 `event` 又无 `data`）时返回
+    ///   [`FrameError::MalformedFrame`]。
+    /// - 帧内容**超过**大小上限时返回 [`FrameError::FrameTooLarge`]。
     ///
     /// ⚠️ 此时**已经解码出来的帧会丢失** —— 因为返回类型是 `Result`。
     /// 这是刻意的：畸形帧说明**上游已经坏了**，
     /// 继续读只会产出更多垃圾。调用方应当**终止**这条流。
+    ///
+    /// # ⚠️ 超限后解码器进入**不可恢复**状态
+    ///
+    /// 超限时无法知道下一帧的边界在哪（分隔符还没出现）——
+    /// **无法重新同步**。所以解码器**释放缓冲区**并记住该错误，
+    /// 之后每次 `push` 都**直接**返回同一个错误。
+    ///
+    /// 这不是「保守」—— 这是**唯一正确**的行为：
+    /// 若继续缓冲，攻击者只要持续发送无分隔符字节就能**再次**撑爆内存。
+    ///
+    /// # ⚠️ 上限约束的是**保留量**，不是**瞬时峰值**
+    ///
+    /// `push` 会先把整个 chunk 拷进缓冲区，再判断超没超限。
+    /// 所以**单次** `push` 传入的巨型 chunk 会让峰值内存短暂达到
+    /// `chunk.len() + 旧缓冲`。
+    ///
+    /// 这**不是**漏洞：调用方本来就**持有**那个 chunk
+    /// （它是上游 socket 读出来的字节），我们的拷贝不会让它**超出**一个副本。
+    /// 上限防的是「**跨多次 push 累积**」——那才是无界的。
+    /// 逐字节/小块喂入时峰值就是 `limit` 本身。
     pub fn push(&mut self, chunk: &[u8]) -> Result<Vec<Frame>, FrameError> {
+        // ⚠️ **先**检查是否已超限 —— 已超限时**不再复制**任何字节进来。
+        if let Some(err) = &self.over_limit {
+            return Err(err.clone());
+        }
+
         self.buf.extend_from_slice(chunk);
 
         let mut frames = Vec::new();
@@ -153,7 +248,13 @@ impl FrameDecoder {
 
         loop {
             let Some((pos, delim_len)) = find_delimiter(&self.buf[scan_from..]) else {
-                // 没有分隔符：下次只需回退「可能跨次到达的最长分隔符」长度 - 1。
+                // 没有分隔符：整个缓冲区就是**一个未完成的帧**。
+                // ⚠️ 它的长度就是该帧内容的**最终长度下界** ——
+                // 已经超限就不可能再变小。
+                if self.buf.len() > self.limit {
+                    return Err(self.exceeded(self.buf.len()));
+                }
+                // 下次只需回退「可能跨次到达的最长分隔符」长度 - 1。
                 // 最长的是 CRLF（4 字节），回退 3 字节即可覆盖跨界起点。
                 self.scanned = self
                     .buf
@@ -162,6 +263,15 @@ impl FrameDecoder {
                 return Ok(frames);
             };
             let pos = scan_from + pos;
+
+            // ⚠️ 帧内容长度 = 分隔符的**绝对**位置 ——
+            // 缓冲区每次都从**帧首**切走，所以 `pos` 就是内容字节数。
+            //
+            // ⚠️ 必须在**切走之前**检查 —— 否则超大的帧会先被
+            // 完整地搬进 `raw`（又一次拷贝），才发现超限。
+            if pos > self.limit {
+                return Err(self.exceeded(pos));
+            }
 
             // ⚠️ 必须把分隔符**连同帧内容一起**切走（**一次** drain ——
             // 两次 drain 会把尾部字节搬移两遍）。
@@ -185,6 +295,31 @@ impl FrameDecoder {
     /// 测试要能断言「半帧被**缓冲**」而不是「半帧被**丢弃**」。
     pub fn buffered(&self) -> usize {
         self.buf.len()
+    }
+
+    /// 帧内容的大小上限（字节）。
+    pub fn limit(&self) -> usize {
+        self.limit
+    }
+
+    /// 记录超限并**释放**缓冲区。
+    ///
+    /// # 为什么释放
+    ///
+    /// 解码器已经**不可恢复** —— 保留这堆字节既没用，
+    /// 又占着内存（那正是我们要防的）。
+    fn exceeded(&mut self, actual: usize) -> FrameError {
+        let err = FrameError::FrameTooLarge {
+            limit: self.limit,
+            actual,
+        };
+        self.over_limit = Some(err.clone());
+        // ⚠️ `Vec::new()` 而**不是** `clear()` ——
+        // `clear()` 保留**容量**（那 1 MiB 还在），
+        // 而解码器已经不会复用这块内存了。
+        self.buf = Vec::new();
+        self.scanned = 0;
+        err
     }
 }
 
@@ -440,5 +575,200 @@ mod tests {
         let f = parse_frame(b"data: {\"x\":1}").unwrap().unwrap();
         assert_eq!(f.event, "");
         assert_eq!(f.data, r#"{"x":1}"#);
+    }
+
+    // ── 帧大小上限（NEX-35） ──
+
+    #[test]
+    fn the_default_limit_is_one_mebibyte() {
+        assert_eq!(MAX_FRAME_BYTES, 1024 * 1024);
+        assert_eq!(FrameDecoder::new().limit(), MAX_FRAME_BYTES);
+    }
+
+    #[test]
+    fn an_oversized_frame_is_rejected_without_panicking() {
+        // 用**小上限**而不是真的 1 MiB —— 行为与上限大小无关，
+        // 但测试跑得快且不占内存。
+        let mut d = FrameDecoder::with_limit(64);
+
+        // 65 字节的内容（**不含**分隔符）+ 分隔符 → 内容**超过**上限。
+        //
+        // ⚠️ 内容全是 `x`（既无 event 也无 data）—— 这**不是**为了让帧畸形，
+        // 而是要保证**先**触发大小检查：畸形检查在**切走**之后才做，
+        // 所以超限帧**永远**报 `FrameTooLarge`，不会报 `MalformedFrame`。
+        let mut chunk = vec![b'x'; 65];
+        chunk.extend_from_slice(b"\n\n");
+
+        let err = d.push(&chunk).unwrap_err();
+        assert_eq!(
+            err,
+            FrameError::FrameTooLarge {
+                limit: 64,
+                actual: 65,
+            }
+        );
+    }
+
+    #[test]
+    fn a_frame_exactly_at_the_limit_is_decoded() {
+        // 边界用例：内容**恰好等于**上限 → 正常解码。
+        //
+        // ⚠️ 这条抓的是「用 `>=` 而不是 `>`」的 off-by-one。
+        let mut d = FrameDecoder::with_limit(64);
+
+        let mut chunk = b"event: delta\n".to_vec();
+        chunk.extend(std::iter::repeat_n(b'x', 64 - chunk.len()));
+        chunk.extend_from_slice(b"\n\n");
+
+        let frames = d.push(&chunk).unwrap();
+        assert_eq!(frames.len(), 1, "恰好等于上限的帧应能解码");
+        assert_eq!(frames[0].event, "delta");
+        assert_eq!(d.buffered(), 0);
+    }
+
+    #[test]
+    fn a_frame_one_byte_over_the_limit_is_rejected() {
+        // 边界用例：内容比上限多 1 字节 → 拒绝。
+        let mut d = FrameDecoder::with_limit(64);
+
+        let mut chunk = b"event: delta\n".to_vec();
+        chunk.extend(std::iter::repeat_n(b'x', 65 - chunk.len()));
+        chunk.extend_from_slice(b"\n\n");
+
+        let err = d.push(&chunk).unwrap_err();
+        assert_eq!(
+            err,
+            FrameError::FrameTooLarge {
+                limit: 64,
+                actual: 65,
+            }
+        );
+    }
+
+    #[test]
+    fn an_oversized_frame_without_a_delimiter_is_rejected() {
+        // ⚠️ **没有分隔符**的持续输入 —— 这才是真正的攻击形态。
+        // 分隔符永远不到达 → 缓冲区一直增长。
+        let mut d = FrameDecoder::with_limit(64);
+
+        let err = d.push(&vec![b'x'; 65]).unwrap_err();
+        assert_eq!(
+            err,
+            FrameError::FrameTooLarge {
+                limit: 64,
+                actual: 65,
+            }
+        );
+    }
+
+    #[test]
+    fn the_buffer_stops_growing_after_the_limit_is_exceeded() {
+        // 超限后**不再继续增长** —— 这是加固的**核心目的**。
+        let mut d = FrameDecoder::with_limit(64);
+
+        assert!(d.push(&vec![b'x'; 65]).is_err());
+        let after = d.buffered();
+
+        // 继续喂入 —— 缓冲区**不得**增长
+        for _ in 0..10 {
+            let _ = d.push(&vec![b'y'; 100]);
+            assert_eq!(d.buffered(), after, "超限后缓冲区不得继续增长");
+        }
+    }
+
+    #[test]
+    fn the_limit_applies_to_the_crlf_delimiter_variant() {
+        // 上限对 **CRLF** 同样生效 —— 代理改写换行不能绕过限制。
+        let mut d = FrameDecoder::with_limit(64);
+
+        let mut chunk = b"event: delta\r\n".to_vec();
+        chunk.extend(std::iter::repeat_n(b'x', 65 - chunk.len()));
+        chunk.extend_from_slice(b"\r\n\r\n");
+
+        let err = d.push(&chunk).unwrap_err();
+        assert_eq!(
+            err,
+            FrameError::FrameTooLarge {
+                limit: 64,
+                actual: 65,
+            }
+        );
+    }
+
+    #[test]
+    fn the_limit_is_applied_per_frame_not_per_chunk() {
+        // ⚠️ 一次喂入里可以包含**多个**帧 —— 上限约束的是**单帧**，
+        // 不是整个 chunk。
+        //
+        // 这条抓的是「拿 `chunk.len()` 当帧长」的错误实现。
+        let mut d = FrameDecoder::with_limit(64);
+
+        let mut chunk = Vec::new();
+        for _ in 0..5 {
+            chunk.extend_from_slice(b"event: delta\ndata: {}\n\n");
+        }
+        assert!(chunk.len() > 64, "本测试需要 chunk 本身超过上限");
+
+        let frames = d.push(&chunk).unwrap();
+        assert_eq!(frames.len(), 5, "多个小帧应全部解码");
+        assert_eq!(d.buffered(), 0);
+    }
+
+    #[test]
+    fn the_too_large_error_carries_no_buffered_content() {
+        // 上游字节是**不可信输入** —— 错误消息不能把它带出去。
+        //
+        // ⚠️ 这条抓的是「把缓冲内容塞进 `Display`」的错误实现 ——
+        // 那会让上游负载进入日志 / 响应体。
+        const SECRET: &str = "SUPER_SECRET_UPSTREAM_PAYLOAD";
+        let mut d = FrameDecoder::with_limit(64);
+
+        // 反复塞入同一段秘密，直到超过上限
+        let mut chunk = Vec::new();
+        while chunk.len() <= 64 {
+            chunk.extend_from_slice(SECRET.as_bytes());
+        }
+
+        let err = d.push(&chunk).unwrap_err();
+        let msg = err.to_string();
+
+        assert!(!msg.contains(SECRET), "错误消息不得包含缓冲内容：{msg}");
+        // 也不得包含**任何**负载片段
+        assert!(!msg.contains("SUPER"), "错误消息不得包含负载片段：{msg}");
+        // ⚠️ 但**长度**必须出现 —— 那是诊断必需的，且不泄露内容
+        assert!(msg.contains("64"), "错误消息应包含上限：{msg}");
+    }
+
+    #[test]
+    fn the_decoder_stays_broken_after_exceeding_the_limit() {
+        // 超限后解码器**不可恢复** —— 后续 push 返回**同一个**错误。
+        //
+        // ⚠️ 这条抓的是「超限后清空缓冲、继续正常解析」的错误实现 ——
+        // 那会让攻击者能**反复**把内存撑到上限（DoS 放大）。
+        let mut d = FrameDecoder::with_limit(64);
+
+        let first = d.push(&vec![b'x'; 65]).unwrap_err();
+        let second = d.push(b"event: delta\ndata: {}\n\n").unwrap_err();
+
+        assert_eq!(first, second, "超限后应返回同一个错误");
+        assert_eq!(d.buffered(), 0, "超限后缓冲区应已释放");
+    }
+
+    #[test]
+    fn an_oversized_frame_after_a_normal_frame_is_rejected() {
+        // 正常帧 + 超大帧（**同一个 chunk**）→ 正常帧产出，
+        // 超大帧报错。
+        //
+        // ⚠️ 这条抓的是「先无条件 extend 再检查」的错误实现 ——
+        // 那会让超大帧**先**被完整搬进 `raw` 才报错（多一次拷贝，
+        // 而且峰值内存翻倍）。
+        let mut d = FrameDecoder::with_limit(64);
+
+        let mut chunk = b"event: ok\ndata: {}\n\n".to_vec();
+        chunk.extend(std::iter::repeat_n(b'x', 65));
+        chunk.extend_from_slice(b"\n\n");
+
+        let err = d.push(&chunk).unwrap_err();
+        assert!(matches!(err, FrameError::FrameTooLarge { .. }));
     }
 }

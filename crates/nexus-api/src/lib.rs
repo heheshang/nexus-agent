@@ -7,7 +7,7 @@
 //! | **统一响应包** —— `{"code": 0, "message": "ok", "data"?}` | [`response`] |
 //! | **协议层错误响应** —— 只序列化 `UserFacing`（`code` + `message`） | [`error`] |
 //! | **`GET /metrics`** —— Prometheus 文本格式的指标端点 | [`metrics`] |
-//! | **SSE 帧编解码** —— 逐字节对齐参考实现 + **半帧缓冲** | [`sse`] |
+//! | **SSE 帧编解码** —— 逐字节对齐参考实现 + **半帧缓冲** + 帧大小上限 | [`sse`] |
 //! | **SSE 桥接** —— 事件流 → 响应体（手写 `Body::from_stream`）+ 断开取消 | [`bridge`] |
 //! | **鉴权中间件** —— 身份提取的**机制**（trait 接缝）+ 请求 ID 透传 | [`middleware`] |
 //! | **路由骨架** —— 可增量注册的构建器 + 示范性 SSE 端点 + 心跳 | [`router`] |
@@ -30,9 +30,10 @@
 //! - SSE 帧编解码器（NEX-31）—— **半帧缓冲**是 SSE 协议里唯一真正会出错的地方；
 //! - SSE 桥接（NEX-32）—— 12 个事件名映射 + 断开即取消；
 //! - 统一响应包（NEX-33）—— 成功 `code == 0`，失败用业务码；
-//! - 协议层中间件与路由骨架（NEX-34）—— 鉴权 trait 接缝 + 请求 ID + 心跳。
+//! - 协议层中间件与路由骨架（NEX-34）—— 鉴权 trait 接缝 + 请求 ID + 心跳；
+//! - 解码器帧大小上限（NEX-35）—— 缓冲**有界**，超限报错而非撑爆内存。
 //!
-//! SSE 解码器的帧大小上限属 NEX-35；P5 收口（架构文档同步 + 契约升格）属 NEX-36。
+//! P5 收口（架构文档同步 + 契约升格）属 NEX-36。
 
 pub mod bridge;
 pub mod error;
@@ -53,7 +54,7 @@ pub use middleware::{
 };
 pub use response::{ApiResponse, SUCCESS_CODE, SUCCESS_MESSAGE};
 pub use router::{DEFAULT_HEARTBEAT_INTERVAL, EventStreamProvider, RouterBuilder, SSE_DEMO_PATH};
-pub use sse::{Frame, FrameDecoder, FrameError, encode_frame, ping};
+pub use sse::{Frame, FrameDecoder, FrameError, MAX_FRAME_BYTES, encode_frame, ping};
 
 /// crate 版本号，便于运行时自检与日志标注。
 pub const CRATE_NAME: &str = env!("CARGO_PKG_NAME");

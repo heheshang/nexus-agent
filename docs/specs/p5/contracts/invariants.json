@@ -355,6 +355,65 @@
         "crates/nexus-api/tests/router.rs::the_sse_demo_endpoint_is_not_registered_without_a_provider"
       ],
       "status": "verified"
+    },
+    {
+      "id": "P5-I31",
+      "statement": "帧内容超过大小上限时 push 返回 FrameTooLarge —— 不 panic、不静默截断",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/src/sse.rs::an_oversized_frame_is_rejected_without_panicking",
+        "crates/nexus-api/src/sse.rs::an_oversized_frame_without_a_delimiter_is_rejected",
+        "crates/nexus-api/src/sse.rs::an_oversized_frame_after_a_normal_frame_is_rejected"
+      ],
+      "status": "verified"
+    },
+    {
+      "id": "P5-I32",
+      "statement": "超限后缓冲区不再增长 —— 解码器释放缓冲并记住错误，后续 push 直接返回该错误",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/src/sse.rs::the_buffer_stops_growing_after_the_limit_is_exceeded",
+        "crates/nexus-api/src/sse.rs::the_decoder_stays_broken_after_exceeding_the_limit"
+      ],
+      "status": "verified"
+    },
+    {
+      "id": "P5-I33",
+      "statement": "恰好等于上限的帧仍能正常解码 —— 边界用例不误杀",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/src/sse.rs::a_frame_exactly_at_the_limit_is_decoded",
+        "crates/nexus-api/src/sse.rs::a_frame_one_byte_over_the_limit_is_rejected"
+      ],
+      "status": "verified"
+    },
+    {
+      "id": "P5-I34",
+      "statement": "上限对 LF 与 CRLF 两种分隔符都生效，且按单帧而非按 chunk 计",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/src/sse.rs::the_limit_applies_to_the_crlf_delimiter_variant",
+        "crates/nexus-api/src/sse.rs::the_limit_is_applied_per_frame_not_per_chunk"
+      ],
+      "status": "verified"
+    },
+    {
+      "id": "P5-I35",
+      "statement": "FrameTooLarge 的 Display 不含缓冲内容 —— 上游负载不进入日志或响应",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/src/sse.rs::the_too_large_error_carries_no_buffered_content"
+      ],
+      "status": "verified"
+    },
+    {
+      "id": "P5-I36",
+      "statement": "默认帧大小上限为 1 MiB，且可被调用方覆盖",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/src/sse.rs::the_default_limit_is_one_mebibyte"
+      ],
+      "status": "verified"
     }
   ],
   "pipeline_order": [
@@ -363,7 +422,8 @@
     "event_name_mapping",
     "bridge_to_body",
     "middleware_extraction",
-    "unified_response"
+    "unified_response",
+    "frame_size_limit"
   ],
   "decisions": [
     {
