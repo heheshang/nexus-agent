@@ -1,0 +1,15 @@
+# 这个文件的作用：**让 `backlog/tasks/` 目录在 git 里持续存在**。
+#
+# 背景：git **不跟踪空目录**。当 `backlog/tasks/` 里的任务全部归档到
+# `backlog/completed/` 后，这个目录会从文件系统**消失** ——
+# 而 `.cursor/rules/` 里有三条规则引用了 `backlog/tasks/` 这个路径
+# （`ai-sdlc-workflow.mdc` / `ai-sdlc-artifacts.mdc` / `ai-sdlc-implementation.mdc`）。
+#
+# `scripts/check-rules.sh` 规则 2 会校验「规则中引用的仓库路径真实存在」，
+# 所以目录一消失，门禁就红 —— 而且是**看起来毫不相关**的红。
+#
+# 这个文件是该目录**唯一的**内容（`.gitkeep` 是 git 社区的约定名），
+# 它让目录结构本身成为**被追踪**的东西。
+#
+# ⚠️ 不要在这里放任务文件 —— 任务文件放 `backlog/tasks/` 下，
+# 完成后用 `git mv` 移到 `backlog/completed/`。
