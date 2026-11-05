@@ -134,6 +134,28 @@ references:
 - **可逆性**：中 —— 若 P4 的 sink 形态变化，桥接要跟着改。
 - **影响面**：`crates/nexus-api/src/bridge.rs`。
 
+### 类别：decide-and-proceed —— 架构文档 §4.1.1 依赖方向表的措辞修正
+
+- **决策**：把架构文档 §4.1.1 依赖方向表的「协议 → 执行（API 不碰执行语义）」
+  改为「协议 → **执行语义**（API 不碰执行语义；只读**类型**可借用）」，
+  并补一条 2026-11-05 修正注记，把判据明确为「**类型可以借，语义不能借**」。
+- **依据**：原措辞被读成「协议层**不得**依赖执行层」，与两处既有事实矛盾 ——
+  ① `nexus-api` 的 `Cargo.toml` **本来就**依赖 `nexus-agent` / `nexus-execution`；
+  ② `scripts/check-deps.sh` 一直把它们列为允许。
+  也就是说原措辞与**已生效的**依赖声明自相矛盾，缺的正是一条「借用类型」的判据。
+  桥接只读 `nexus_agent::events::EventStream` **类型**，不调用任何执行逻辑 ——
+  符合架构文档 §1.4「协议层不能感知业务规则、事务边界」的**本意**。
+- **可逆性**：高 —— 只是文档措辞；判据若被证明不合适，可再改回并同步
+  `scripts/check-deps.sh` 的允许清单。
+- **影响面**：`docs/architecture/2026-11-04-nexusagent-rust-architecture-design.md` §4.1.1 / §4.3.3 表。
+
+> **为什么这属于 (a) decide-and-proceed 而不是 (b) timeboxed**：
+> 这是**收紧**控制（把模糊的「不碰执行语义」写成可判定的「类型可以借，语义不能借」）
+> 而非削弱；文档改动可低成本回滚；影响面限于一份文档的措辞与一张表。
+>
+> **边界变化仍按违规处理**：若协议层开始**调用** `nexus-agent` 的执行函数，
+> 结构层测试与评审会拦下 —— 本次修正**不改变**依赖方向的实质约束。
+
 ## 实现过程中的发现
 
 ### 发现 1 —— `Body::from_stream` **不设置任何响应头**（真实缺陷，初版踩到）
@@ -221,3 +243,47 @@ references:
 - `cargo fmt --all --check` 通过
 - `cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警
 - `scripts/check-specs.sh` 通过（P5-I10~I15、I24、I25 已升格为 `verified`）
+
+### 复核 —— 故障注入（**独立 worktree** 重跑，2026-11-05）
+
+原提交的注入记录见「发现 6」。为排除「注入脚本本身写错导致假红」，
+在**独立 git worktree**（`@ 7c56065`，不碰主工作区）重跑了 13 项注入：
+
+| 注入 | 结果 |
+|---|---|
+| 事件名 `tool_call` → `toolCall` | FAILED（17 passed / 1 failed）✓ |
+| 事件名 `done` → `finish` | FAILED（17 passed / 1 failed）✓ |
+| 事件名 `agent_event` → `agent` | FAILED（17 passed / 1 failed）✓ |
+| 错误帧带 `cause` | FAILED（17 passed / 1 failed）✓ |
+| 错误码 `ServiceUnavailable` → `Internal` | FAILED（8 passed / 1 failed）✓ |
+| 正常结束**也**取消（删 `disarm`） | FAILED（8 passed / 1 failed）✓ |
+| 上游出错**也**取消（删 `disarm`） | FAILED（8 passed / 1 failed）✓ |
+| 断开**不**触发取消 | FAILED（8 passed / 1 failed）✓ |
+| `data` 里加 `run_id` | FAILED（17 passed / 1 failed）✓ |
+| 帧字节格式被破坏（`event:` 后少空格） | FAILED（16 passed / 2 failed）✓ |
+| 帧分隔符缺失（`\n\n` → `\n`） | FAILED（13 passed / 5 failed）✓ |
+| 心跳被当畸形帧 | FAILED（8 passed / 10 failed）✓ |
+| 源码里用 `axum::response::sse` | FAILED —— 结构层断言**精确指出违规文件** ✓ |
+
+恢复后：`18 + 4 + 7 + 9` 全绿。
+
+#### 复核中发现的一处**方法论缺陷**
+
+第一版复核脚本把 cargo 结尾的 `error: test failed, to rerun pass ...`
+误判为「编译失败」—— 于是 13 项注入**全部**显示「会红」，
+其中「使用 axum 的 `Sse`」那一项其实**只是编译不过**（泛型参数写错），
+**并没有真正触发**结构层断言。
+
+**这正是「测试存在 ≠ 断言有效」的同一类陷阱的变体**：
+判定脚本自己也会有假绿 / 假红。修正判据（只认 `error[E…]` 与
+`could not compile`，测试失败单独看 `test result: … FAILED`）后重跑，
+并对 `Sse` 注入改用**正确的泛型参数**，结构层断言才真正被触发：
+
+```text
+test the_api_crate_does_not_use_the_axum_sse_type ... FAILED
+决策 D8 要求手写 Body::from_stream，不得使用 axum 的 Sse 类型。
+违规文件：["…/crates/nexus-api/src/bridge.rs"]
+```
+
+**教训**：注入验证的**判据**与**被验证的断言**一样需要被验证。
+「13/13 会红」这个结论本身，在判据写错时是**无意义的**。
