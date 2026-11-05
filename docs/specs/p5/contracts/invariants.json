@@ -162,7 +162,7 @@
       "verified_by": [
         "crates/nexus-api/src/bridge.rs::all_twelve_event_names_map_correctly"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P5-I11",
@@ -171,7 +171,7 @@
       "verified_by": [
         "crates/nexus-api/tests/architecture.rs::the_api_crate_does_not_use_the_axum_sse_type"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P5-I12",
@@ -180,7 +180,7 @@
       "verified_by": [
         "crates/nexus-api/tests/sse_bridge.rs::every_frame_the_bridge_writes_can_be_decoded_back"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P5-I13",
@@ -189,7 +189,7 @@
       "verified_by": [
         "crates/nexus-api/tests/sse_bridge.rs::the_stream_ends_without_extra_frames"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P5-I14",
@@ -199,7 +199,7 @@
         "crates/nexus-api/tests/sse_bridge.rs::a_stream_error_becomes_an_error_frame",
         "crates/nexus-api/tests/sse_bridge.rs::the_error_frame_carries_no_internal_cause"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P5-I15",
@@ -208,7 +208,7 @@
       "verified_by": [
         "crates/nexus-api/tests/sse_bridge.rs::a_client_disconnect_cancels_the_run"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P5-I16",
@@ -291,7 +291,7 @@
       "verified_by": [
         "crates/nexus-api/tests/architecture.rs::the_api_crate_does_not_depend_on_the_data_layer"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P5-I25",
@@ -300,7 +300,7 @@
       "verified_by": [
         "crates/nexus-api/tests/architecture.rs::the_api_crate_adds_no_internal_dependencies"
       ],
-      "status": "planned"
+      "status": "verified"
     }
   ],
   "pipeline_order": [

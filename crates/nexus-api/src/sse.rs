@@ -94,7 +94,9 @@ impl Frame {
 ///
 /// 用 `to_vec`（紧凑形式）比 `to_string`（可能带换行美化）更可控。
 pub fn encode_frame(event: &str, data: &Value) -> Vec<u8> {
-    let payload = serde_json::to_vec(data).expect("序列化不应失败");
+    // `serde_json::Value` 的序列化在实践中不可失败（键必为字符串）。
+    // 仍然不 panic —— 服务器进程里一个 `expect` 就是一次可用性事故。
+    let payload = serde_json::to_vec(data).unwrap_or_else(|_| b"null".to_vec());
     let mut buf = Vec::with_capacity(payload.len() + event.len() + 16);
     buf.extend_from_slice(b"event: ");
     buf.extend_from_slice(event.as_bytes());
@@ -118,6 +120,11 @@ pub fn ping() -> Vec<u8> {
 #[derive(Debug, Default)]
 pub struct FrameDecoder {
     buf: Vec<u8>,
+    /// 已经扫描过、确认**不含分隔符起点**的字节数。
+    ///
+    /// 逐字节喂入时，若每次都从 0 重扫，退化是 O(n²)。
+    /// 下一次只需从「可能跨次到达的分隔符起点」重扫。
+    scanned: usize,
 }
 
 impl FrameDecoder {
@@ -140,14 +147,31 @@ impl FrameDecoder {
         self.buf.extend_from_slice(chunk);
 
         let mut frames = Vec::new();
-        while let Some((pos, delim_len)) = find_delimiter(&self.buf) {
-            // ⚠️ 必须把分隔符**连同帧内容一起**切走。
+        // 只从「上次没扫过」的位置开始找 —— 否则逐字节喂入时
+        // 每次都要重扫整个缓冲，退化为 O(n²)。
+        let mut scan_from = self.scanned;
+
+        loop {
+            let Some((pos, delim_len)) = find_delimiter(&self.buf[scan_from..]) else {
+                // 没有分隔符：下次只需回退「可能跨次到达的最长分隔符」长度 - 1。
+                // 最长的是 CRLF（4 字节），回退 3 字节即可覆盖跨界起点。
+                self.scanned = self
+                    .buf
+                    .len()
+                    .saturating_sub(FRAME_DELIMITER_CRLF.len() - 1);
+                return Ok(frames);
+            };
+            let pos = scan_from + pos;
+
+            // ⚠️ 必须把分隔符**连同帧内容一起**切走（**一次** drain ——
+            // 两次 drain 会把尾部字节搬移两遍）。
             // 只切内容会把分隔符留在缓冲区头部，
-            // 下一轮 position() 又返回 0 → **死循环**。
-            let raw = self.buf.drain(..pos).collect::<Vec<u8>>();
-            // 分隔符本身已被「切走」的语义覆盖 —— drain 只取内容，
-            // 这里显式把分隔符长度也从缓冲区移除。
-            self.buf.drain(..delim_len);
+            // 下一轮 find_delimiter() 又返回 0 → **死循环**。
+            let mut raw: Vec<u8> = self.buf.drain(..pos + delim_len).collect();
+            raw.truncate(pos);
+
+            // 剩余缓冲区从头开始扫描（序号已变）。
+            scan_from = 0;
 
             // 纯注释帧（心跳）被**跳过** —— 不是错误。
             let Some(frame) = parse_frame(&raw)? else {
@@ -155,7 +179,6 @@ impl FrameDecoder {
             };
             frames.push(frame);
         }
-        Ok(frames)
     }
     /// 当前缓冲的**半帧**字节数。
     ///
@@ -170,23 +193,33 @@ impl FrameDecoder {
 /// 返回 `(内容长度, 分隔符长度)`。
 ///
 /// 两种分隔符都要认 —— 但**要取更早的那个**。
+///
+/// # 为什么是**单次扫描**
+///
+/// 分成两次 `.position()`（LF 一次、CRLF 一次）时，
+/// 若缓冲区里根本没有 CRLF，CRLF 那次会扫到缓冲区末尾 ——
+/// 多帧连续解码时就是 O(帧数 × 缓冲区大小)。
+/// 单次扫描在找到**最早**匹配时立即返回，配合调用方的扫描游标是线性的。
+///
+/// LF 以 `\n` 开头、CRLF 以 `\r` 开头，两者不可能起点相同，
+/// 所以「先到先得」不会产生歧义。
 fn find_delimiter(buf: &[u8]) -> Option<(usize, usize)> {
-    let lf = buf
-        .windows(FRAME_DELIMITER.len())
-        .position(|w| w == FRAME_DELIMITER)
-        .map(|p| (p, FRAME_DELIMITER.len()));
-
-    let crlf = buf
-        .windows(FRAME_DELIMITER_CRLF.len())
-        .position(|w| w == FRAME_DELIMITER_CRLF)
-        .map(|p| (p, FRAME_DELIMITER_CRLF.len()));
-
-    match (lf, crlf) {
-        (Some(a), Some(b)) => Some(if a.0 <= b.0 { a } else { b }),
-        (Some(a), None) => Some(a),
-        (None, Some(b)) => Some(b),
-        (None, None) => None,
+    let mut i = 0;
+    while i + 1 < buf.len() {
+        if buf[i] == b'\n' && buf[i + 1] == b'\n' {
+            return Some((i, FRAME_DELIMITER.len()));
+        }
+        if i + 3 < buf.len()
+            && buf[i] == b'\r'
+            && buf[i + 1] == b'\n'
+            && buf[i + 2] == b'\r'
+            && buf[i + 3] == b'\n'
+        {
+            return Some((i, FRAME_DELIMITER_CRLF.len()));
+        }
+        i += 1;
     }
+    None
 }
 
 /// 解析一帧的**内容**（不含分隔符）。

@@ -1,5 +1,5 @@
 ---
-id: NEX-35
+id: NEX-36
 title: "docs(api): P5 收口 —— 架构文档同步与契约升格"
 status: To Do
 assignee: []
@@ -10,9 +10,10 @@ dependencies:
   - NEX-32
   - NEX-33
   - NEX-34
+  - NEX-35
 references:
   - "docs/specs/p5/spec.md §5、§6"
-  - "docs/specs/p5/tasks.md T-005"
+  - "docs/specs/p5/tasks.md T-006"
   - "docs/architecture/2026-11-04-nexusagent-rust-architecture-design.md §6.1"
 ---
 
@@ -87,7 +88,7 @@ NEX-24 / NEX-25 的教训：**没验证过会红的断言，等于没有断言**
 ### #3 引用可解析
 
 - `docs/specs/p5/spec.md §5、§6` —— 存在
-- `docs/specs/p5/tasks.md T-005` —— 存在
+- `docs/specs/p5/tasks.md T-006` —— 存在
 - `docs/architecture/2026-11-04-nexusagent-rust-architecture-design.md §6.1` —— 存在
 
 ### #4 范围有界
@@ -102,7 +103,7 @@ crate 依赖方向、对外响应形状。
 | `docs/architecture/2026-11-04-nexusagent-rust-architecture-design.md` | **修改** —— §5.4 / §6.1 |
 | `docs/specs/p5/contracts/invariants.json` | **修改** —— status 升格 |
 | `docs/operations/` 下的运行说明 | **修改/新增** |
-| `backlog/completed/NEX-35 - ...md` | **新增** —— 归档 |
+| `backlog/completed/NEX-36 - ...md` | **新增** —— 归档 |
 
 ### #6 完成态可描述
 
@@ -111,13 +112,14 @@ crate 依赖方向、对外响应形状。
 
 ### #7 无隐形依赖
 
-- NEX-31 ~ NEX-34 均已登记在 `backlog/tasks/`
+- NEX-31 ~ NEX-35 均已登记在 `backlog/tasks/`
+  （NEX-35 是解码器加固任务 —— 收口必须排在它之后）
 - `scripts/check-specs.sh` **已**存在（**修改**而非新增）
 - 无其他未言明的结构性假设
 
 ### 结论
 
-**pass** —— 七项全过，但需 NEX-31 ~ NEX-34 完成后开工。
+**pass** —— 七项全过，但需 NEX-31 ~ NEX-35 完成后开工。
 
 ---
 

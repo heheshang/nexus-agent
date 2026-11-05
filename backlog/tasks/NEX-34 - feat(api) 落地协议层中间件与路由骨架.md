@@ -9,7 +9,7 @@ dependencies:
   - NEX-32
   - NEX-33
 references:
-  - "docs/specs/p5/spec.md §3.3、§3.5、§3.6"
+  - "docs/specs/p5/spec.md §1.1、§3.2、§3.3、§3.5、§3.6"
   - "docs/specs/p5/tasks.md T-004"
   - "docs/architecture/2026-11-04-nexusagent-rust-architecture-design.md §1.4"
 ---
@@ -65,7 +65,9 @@ references:
 - [ ] #6 `nexus-api` **不引用** `nexus-service` 的**具体类型**（同 P4 的 D4 纪律）
 - [ ] #7 `crates/nexus-api/tests/architecture.rs` 断言 `nexus-api` 不依赖 `nexus-repo` / `nexus-infra`
 - [ ] #8 `crates/nexus-api/Cargo.toml` **不新增**任何内部 crate 依赖
-- [ ] #9 `cargo fmt --all --check` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo test --workspace --locked` 通过
+- [ ] #9 路由层注入**心跳** —— 空闲连接按配置间隔写出 `: ping\n\n` 注释帧；桥接**不自带**定时器（spec §3.2）
+- [ ] #10 **请求 ID 透传** —— 中间件为每个请求分配或透传请求 ID，放进请求 `Extension` 与响应头（spec §1.1）
+- [ ] #11 `cargo fmt --all --check` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo test --workspace --locked` 通过
 
 ## DoR 判定
 
@@ -76,7 +78,7 @@ references:
 
 ### #1 验收条件可二元测试
 
-9 条 AC 全部可二元判定 —— 每条都指明「trait / 函数存在 / 行为可观测 / 命令退出码」。
+11 条 AC 全部可二元判定 —— 每条都指明「trait / 函数存在 / 行为可观测 / 命令退出码」。
 
 ### #2 无未决标记
 

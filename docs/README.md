@@ -59,7 +59,7 @@
 | [`specs/p4/contracts/error-codes.json`](specs/p4/contracts/error-codes.json) | P4 允许触碰的业务码白名单 |
 | [`specs/p5-tiering.md`](specs/p5-tiering.md) | P5 协议层的**分层判定**记录（S1 · Tier 2 · Spec） |
 | [`specs/p5/spec.md`](specs/p5/spec.md) | P5 协议层的契约（范围、红线、SSE 帧格式、已定稿决策 D8~D11） |
-| [`specs/p5/tasks.md`](specs/p5/tasks.md) | P5 的任务清单（`T-001`~`T-005` ↔ `NEX-31`~`NEX-35` 一一对应） |
+| [`specs/p5/tasks.md`](specs/p5/tasks.md) | P5 的任务清单（`T-001`~`T-006` ↔ `NEX-31`~`NEX-36` 一一对应） |
 | [`specs/p5/contracts/invariants.json`](specs/p5/contracts/invariants.json) | P5 的机器可读不变量（25 条，含 `planned` / `verified` 状态） |
 | [`specs/p5/contracts/error-codes.json`](specs/p5/contracts/error-codes.json) | P5 允许触碰的业务码白名单 |
 | [`rfcs/README.md`](rfcs/README.md) | **Tier 1 · RFC 层**产物的结构与 OQ 禁令 |

@@ -88,16 +88,38 @@
 - AC: `nexus-api` **不引用** `nexus-service` 的**具体类型**（同 P4 的 D4 纪律）
 - AC: `crates/nexus-api/tests/architecture.rs` 断言 `nexus-api` 不依赖 `nexus-repo` / `nexus-infra`
 - AC: `crates/nexus-api/Cargo.toml` **不新增**任何内部 crate 依赖
+- AC: 路由层注入**心跳** —— 空闲连接按配置间隔写出 `: ping\n\n` 注释帧；桥接**不自带**定时器（spec §3.2）
+- AC: **请求 ID 透传** —— 中间件为每个请求分配或透传请求 ID，放进请求 `Extension` 与响应头（spec §1.1）
 - AC: `cargo fmt --all --check` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo test --workspace --locked` 通过
 
-### T-005 — P5 收口：架构文档同步 + 契约升格 + 故障注入
+### T-005 — SSE 解码器帧大小上限（加固）
+
+P5 完成判据之外的**加固**任务：`FrameDecoder` 的缓冲区当前**没有上限** ——
+上游持续发送不含分隔符的字节会让内存无界增长。
+
+收口任务 T-006 在本任务之后执行 —— 收口必须覆盖全部 P5 代码改动。
+
+对应 backlog 任务：`backlog/tasks/NEX-35 - sse-decoder-frame-size-limit.md`
+依赖：无（T-001 已交付；本任务修改其实现）
+对应设计条款：`docs/specs/p5/spec.md` §3.1.2（半帧缓冲）
+
+- AC: 定义帧大小上限常量（默认 1 MiB），且可被测试引用
+- AC: 超限时 `push` 返回 `FrameError::FrameTooLarge`，**不 panic**
+- AC: 返回错误后缓冲区**不再增长**
+- AC: 恰好等于上限的帧仍能正常解码（边界用例）
+- AC: 上限对 LF 与 CRLF 两种分隔符都生效
+- AC: `FrameError::FrameTooLarge` 的 `Display` **不含缓冲内容**
+- AC: 既有解码测试（逐字节喂入、任意切分点、分隔符不残留）全部保持通过
+- AC: `cargo fmt --all --check` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo test --workspace --locked` 通过
+
+### T-006 — P5 收口：架构文档同步 + 契约升格 + 故障注入
 
 把 P5 落地后的事实**回写**到架构文档，并把不变量契约**升格**为 `verified`。
 
 同时做**门禁自身的防伪验证**（NEX-24 / NEX-25 的教训）。
 
-对应 backlog 任务：`backlog/tasks/NEX-35 - docs(api) P5 收口 —— 架构文档同步与契约升格.md`
-依赖：T-001、T-002、T-003、T-004
+对应 backlog 任务：`backlog/tasks/NEX-36 - docs(api) P5 收口 —— 架构文档同步与契约升格.md`
+依赖：T-001、T-002、T-003、T-004、T-005
 对应设计条款：架构文档 §6.1、§6.2
 
 - AC: 架构文档 §6.1 的 P5 行标记为**完成**，并附**可核验**的交付摘要（不变量条数、测试数）
