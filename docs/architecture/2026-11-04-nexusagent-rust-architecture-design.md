@@ -1893,6 +1893,48 @@ Rust 的测试可以验证「某段代码**不能**编译」：
 | `generation` fencing 拒绝僵尸写入 | 旧持有者写入影响 0 行 | ✅ 已验证（NEX-12 `stale_generation_write_is_rejected`） |
 | 集成测试在 CI 里**真的跑** | 解析 `cargo test` 输出，断言各集成套件的测试数达阈值 | ✅ 已验证（NEX-14 CI 的「校验集成测试真的跑了」步骤） |
 | CI 缺 `DATABASE_URL` 时**必须红** | 集成测试基座在 CI 环境 panic，而非静默跳过 | ✅ 已验证（NEX-14 `nexus-repo` / `nexus-infra` 两套基座行为一致） |
+| 工具调用协议**配对完整** | 孤立结果 / 缺失结果 / 重复 ID 三种违规都被拒 | ✅ 已验证（NEX-26 `protocol.rs` 的 4 个负向用例） |
+| 协议校验**先于**裁剪 | 配对断裂且超预算时，报的是**配对错误** | ✅ 已验证（NEX-26/27 `the_pairing_check_runs_before_the_budget_check`） |
+| 上下文裁剪**整轮淘汰** | 淘汰该轮的 assistant 与**所有**并行工具结果，不留孤立 `tool_result` | ✅ 已验证（NEX-27 `a_whole_turn_is_evicted_with_its_parallel_tool_results`） |
+| 裁剪保留 system 与**最新一轮** user | 逐条断言保留集 | ✅ 已验证（NEX-27 `all_system_messages_are_retained` + `the_latest_user_turn_is_retained`） |
+| 裁剪**不生成摘要** | 保留的消息逐条是**原有**消息 | ✅ 已验证（NEX-27 `no_summary_message_is_generated`） |
+| 裁剪是**纯函数** | 入参未被修改，同输入同输出 | ✅ 已验证（NEX-27 `compaction_is_pure`） |
+| 裁剪的**双向边界** | 恰好在预算内通过，超出即 `BudgetExceeded` | ✅ 已验证（NEX-27 `the_budget_boundary_is_tested_in_both_directions`） |
+| 事件序号**严格单调、无重复、无空洞** | 8 个并发生产者共 200 条事件，序号为 1..N 的完整集合 | ✅ 已验证（NEX-28 `concurrent_producers_still_yield_a_strictly_monotonic_sequence`） |
+| 序号**单点分配** | 结构层断言：源码里只允许**一处**推进序号 | ✅ 已验证（NEX-28 `the_sink_does_not_use_a_mutex`） |
+| 终态**必达**、增量**可丢** | 填满可丢通道后终态仍送达；可丢通道满时**不阻塞** | ✅ 已验证（NEX-28 `terminal_events_are_delivered_even_after_the_lossy_channel_is_full` + `a_full_lossy_channel_never_blocks`） |
+| 背压超时**主动取消** | 断言取消令牌被触发，而非无限阻塞 | ✅ 已验证（NEX-28 `backpressure_timeout_cancels_the_run_instead_of_blocking_forever`） |
+| ReAct 循环跑通**至少两轮** | 模型要工具 → 工具执行 → 结果回灌 → 模型给答案 | ✅ 已验证（NEX-29 `the_loop_runs_at_least_two_rounds`） |
+| 三个安全阀全部生效 | 迭代上限 / 单步超时 / 总超时各自断言终态码 | ✅ 已验证（NEX-29 `the_iteration_limit_terminates_the_loop` + `the_step_timeout_terminates_the_loop` + `the_total_timeout_terminates_the_loop`） |
+| 工具失败**结构化回灌**且**不终止**循环 | 错误作为 `{"error", "message"}` 的 `tool` 消息回灌，模型仍能给出答案 | ✅ 已验证（NEX-29 `a_tool_failure_is_fed_back_as_a_structured_observation`） |
+| 工具输出是**数据**不是指令 | 回灌时是 `tool` 角色，**不是** `assistant` 角色 | ✅ 已验证（NEX-29 `tool_output_is_fed_back_as_a_tool_role_message`） |
+| 工具并发**限流** | 6 个工具、上限 2 —— 并发峰值 ≤ 2 | ✅ 已验证（NEX-29 `concurrent_tool_execution_respects_the_limit`） |
+| 取消**不是失败** | 取消的终态是 `done`，不是 `error` | ✅ 已验证（NEX-29 `cancellation_is_not_a_failure`） |
+| **先固化错误再取消** | 供应商失败**原样**保留，不被 `cancel` 覆盖成「用户取消」 | ✅ 已验证（NEX-29 `a_provider_failure_is_not_masked_by_cancellation`） |
+| 工具输出**超长被截断** | 截断保持 **UTF-8 边界**，且带截断标记 | ✅ 已验证（NEX-29 `a_huge_tool_output_is_truncated` + `the_truncation_respects_utf8_boundaries`） |
+| 裁剪**每步**重跑 | 第二步在**构造请求**时就超预算 —— 证明裁剪不是只在第一步跑 | ✅ 已验证（NEX-29 `the_second_step_sees_a_compacted_history`） |
+
+> **落地记录（2026-11-05，P4 完成）**：上表的 P4 各行由 `nexus-agent` 承担，
+> 契约载体是 `docs/specs/p4/contracts/invariants.json`（**25 条**不变量，
+> 逐条指向**真实存在的测试名**）——
+> `scripts/check-specs.sh` 规则 3 校验「契约引用的测试真的存在」，
+> 规则 3b 校验「已完成的 Spec 不得残留 `planned`」。
+>
+> P4 的**契约先于实现**（S2 产出物落盘在 S4 实现之前），
+> 所以规则 3 必须能表达「契约已声明、证据待产生」这个中间态 ———
+> 这就是 `status: "planned"` 的用途，也是规则 3b 存在的理由：
+> **没有它，`planned` 会变成可以永久停留的状态，而门禁看起来是绿的。**
+>
+> 行为层的断言经过了**注入故障**验证（变异测试确认会红）——
+> 六类变异分别对应：工具失败终止循环、工具输出冒充 `assistant`、
+> 迭代上限失效、取消被当成失败、并发限流失效、跳过裁剪。
+> P4 的一条教训：**行为测试抓不住方案 A（`fetch_add` 分配序号）**——
+> 并发下「序号与到达顺序脱节」需要极端重排才显现。
+> 所以那条不变量靠**结构层断言**（源码里只允许一处推进序号）守住。
+>
+> 架构文档 §2.2.4.1 的**事件清单**与 §2.6.4.1 的**业务码表**在 P4 **未被改动** ——
+> P4 只**复用** `nexus_core::EventPayload` 与既有的 42 个码，
+> **不新增**事件名与码值。
 
 > ✅ 已验证项均在 2026-11-04 实测（PostgreSQL 17 / Rust 1.99.1）。
 >
@@ -2011,7 +2053,7 @@ cd <nexus-agent>/examples && cargo run -p demo-lease-fencing
 | **P1 核心类型** | `nexus-core` 的类型：取消语义、事件、错误 | 负向测试通过 | ✅ 完成（11 个负向用例 + 9 个跨模块契约测试） |
 | **P2 基础设施** | `nexus-infra`（PG/Redis/S3/Milvus）、`nexus-repo` | 迁移可应用、集成测试绿 | ✅ 完成（NEX-8..14；19 张 Phase 0 表在**空库**上可应用且可重复执行，50 个集成测试在 PostgreSQL 17 上全绿，CI 有 PG `services:` 且**真跑**集成测试） |
 | **P3 LLM 网关** | `nexus-llm`：供应商、预算、重试、熔断 | 预算裁剪与回退边界有测试 | ✅ 完成（NEX-16..19；9 个协议类型 + 预算裁剪 + 重试退避 + 熔断 + OpenAI 兼容客户端 + 网关回退边界，88 个测试；**熔断是单副本粒度** —— 见 §4.3） |
-| **P4 Agent 运行时** | `nexus-agent`：ReAct、上下文预算 | ReAct 循环有测试 | 🚧 进行中（Spec 已落盘：`docs/specs/p4/`；NEX-26~30 待开工） |
+| **P4 Agent 运行时** | `nexus-agent`：ReAct、上下文预算 | ReAct 循环有测试 | ✅ 完成（NEX-26..30；**trait 边界**（`ChatModel` 泛型 + `InvokableTool` dyn）+ **协议完整性校验**（配对先于裁剪）+ **整轮淘汰**（不生成摘要）+ **事件 sink**（单点分配序号 + 必达/可丢双通道 + 背压主动取消）+ **ReAct 循环**（三个安全阀 + 工具结果结构化回灌 + 并发限流 + UTF-8 安全截断），65 个测试；契约载体 `docs/specs/p4/contracts/invariants.json`（25 条不变量**全部 verified**）） |
 | **P5 协议层** | `nexus-api`：REST + SSE | SSE 半帧处理有测试 | ⬜ |
 | **P6 工作流** | `nexus-workflow` + `nexus-execution` | 租约、fencing、审批恢复有测试 | ⬜ |
 | **P7 知识与记忆** | `nexus-rag`、`nexus-memory` | 混合检索降级路径有测试 | ⬜ |
