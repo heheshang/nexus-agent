@@ -1,0 +1,27 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: rs-work-pipeline
+spec:
+  triggers:
+    - event: issue.assigned
+  providers:
+    github:
+      type: github
+      config:
+        org: kiven
+        repo: rs-work
+  stages:
+    - name: code
+      agent: coding-agent
+      timeout: PT10M
+      onFailure:
+        strategy: retry
+        maxRetries: 2
+        retryDelay: PT1M
+    - name: review
+      approval:
+        required: true
+        blocking: true
+        timeout: PT24H
+        onTimeout: abort
