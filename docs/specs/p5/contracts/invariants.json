@@ -1,0 +1,374 @@
+{
+  "$schema": "nexus-agent/spec-contract/v1",
+  "spec": "p5",
+  "specRef": "docs/specs/p5/spec.md",
+  "phase": "P5",
+  "crate": "nexus-api",
+  "$comment": [
+    "P5 的不变量契约。",
+    "",
+    "status 语义（scripts/check-specs.sh 规则 3）：",
+    "  verified —— 该不变量**已有**证据；verified_by 指向的测试必须**真的存在**。",
+    "  planned —— 该不变量已**声明**，证据将在对应 Task 落地时产生；",
+    "              此时 verified_by 指向的测试文件可能还不存在。",
+    "",
+    "「planned 不等于可以糊弄」：规则 3b 会在该 Spec 的**全部任务都归档**后",
+    "要求所有 planned 提升为 verified —— 届时测试必须存在，否则门禁红。",
+    "",
+    "这解决了 S2 必须先于 S4 的顺序问题：Spec 在实现之前落盘，",
+    "契约声明**先于**证据产生，但证据缺失时门禁**不会**因此被绕过。"
+  ],
+  "error_codes": {
+    "$comment": "P5 复用的 nexus-core 已定稿业务码 —— 不得新增，不得改值。",
+    "source": "crates/nexus-core/src/error.rs",
+    "allowed": [
+      {
+        "code": 10001,
+        "variant": "InvalidParam",
+        "http": 400,
+        "retry": "Terminal",
+        "p5_use": "请求体非法 / SSE 帧畸形"
+      },
+      {
+        "code": 20101,
+        "variant": "Unauthorized",
+        "http": 401,
+        "retry": "Terminal",
+        "p5_use": "缺少身份凭证"
+      },
+      {
+        "code": 20201,
+        "variant": "Forbidden",
+        "http": 403,
+        "retry": "Terminal",
+        "p5_use": "身份无权访问该资源"
+      },
+      {
+        "code": 40001,
+        "variant": "RateLimited",
+        "http": 429,
+        "retry": "Retryable",
+        "p5_use": "上游/共享额度已满"
+      },
+      {
+        "code": 90001,
+        "variant": "Internal",
+        "http": 500,
+        "retry": "Terminal",
+        "p5_use": "协议层内部状态不一致"
+      },
+      {
+        "code": 90002,
+        "variant": "NotImplemented",
+        "http": 501,
+        "retry": "Terminal",
+        "p5_use": "端点未实现（骨架占位）"
+      },
+      {
+        "code": 90003,
+        "variant": "ServiceUnavailable",
+        "http": 503,
+        "retry": "Retryable",
+        "p5_use": "服务不可用 / 运行已取消"
+      }
+    ]
+  },
+  "invariants": [
+    {
+      "id": "P5-I01",
+      "statement": "半帧被缓冲而非丢弃 —— 喂入不完整的帧不产出帧，缓冲字节数大于零",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/src/sse.rs::a_partial_frame_is_buffered_not_emitted"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P5-I02",
+      "statement": "逐字节喂入不丢帧 —— 一帧被切成 N 片喂入，最终得到完整的一帧",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/src/sse.rs::a_byte_by_byte_feed_reassembles_the_frame"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P5-I03",
+      "statement": "任意切分点都正确重组 —— 在帧的每一个字节位置切断，两次喂入后结果相同",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/src/sse.rs::every_split_point_reassembles_identically"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P5-I04",
+      "statement": "分隔符不残留 —— 连续多帧解码后缓冲区清空（防死循环回归）",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/src/sse.rs::consecutive_frames_leave_the_buffer_empty"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P5-I05",
+      "statement": "帧格式逐字节对齐 —— 编码结果等于期望字符串，不是 round-trip 断言",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/src/sse.rs::the_encoded_frame_matches_the_reference_bytes"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P5-I06",
+      "statement": "畸形帧被拒绝 —— 空帧、既无 event 又无 data 的帧返回错误",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/src/sse.rs::a_malformed_frame_is_rejected"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P5-I07",
+      "statement": "CRLF 变体被容忍 —— \\r\\n\\r\\n 分隔的帧也能正确解码",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/src/sse.rs::a_crlf_variant_is_accepted"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P5-I08",
+      "statement": "多行 data 按 SSE 规范用换行连接",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/src/sse.rs::multiline_data_is_joined_with_a_newline"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P5-I09",
+      "statement": "心跳注释行被忽略 —— 注释不产生帧",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/src/sse.rs::a_comment_line_is_ignored"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P5-I10",
+      "statement": "全部 12 个事件名映射正确 —— 不是抽查",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/src/bridge.rs::all_twelve_event_names_map_correctly"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P5-I11",
+      "statement": "桥接手写字节输出 —— 源码不含 axum 的 Sse 类型",
+      "layer": "structure",
+      "verified_by": [
+        "crates/nexus-api/tests/architecture.rs::the_api_crate_does_not_use_the_axum_sse_type"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P5-I12",
+      "statement": "桥接的每帧都能被解码器完整解回 —— 输出符合帧格式",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/tests/sse_bridge.rs::every_frame_the_bridge_writes_can_be_decoded_back"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P5-I13",
+      "statement": "事件流结束即流结束 —— 不补额外的帧",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/tests/sse_bridge.rs::the_stream_ends_without_extra_frames"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P5-I14",
+      "statement": "事件流出错发 error 帧，且不含内部原因",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/tests/sse_bridge.rs::a_stream_error_becomes_an_error_frame",
+        "crates/nexus-api/tests/sse_bridge.rs::the_error_frame_carries_no_internal_cause"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P5-I15",
+      "statement": "客户端断开触发取消令牌",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/tests/sse_bridge.rs::a_client_disconnect_cancels_the_run"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P5-I16",
+      "statement": "成功响应的 code 是数字 0，失败响应的 code 是业务码",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/tests/response.rs::a_success_response_carries_the_numeric_zero_code",
+        "crates/nexus-api/tests/response.rs::a_failure_response_carries_the_business_code"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P5-I17",
+      "statement": "响应体不含内部原因 —— 只有 code 与 message",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/tests/response.rs::the_response_body_carries_no_internal_cause"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P5-I18",
+      "statement": "失败响应的 HTTP 状态码与业务码一致",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/tests/response.rs::the_http_status_matches_the_business_code"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P5-I19",
+      "statement": "data 缺省时省略该字段 —— 不输出 null",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/tests/response.rs::an_absent_data_field_is_omitted"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P5-I20",
+      "statement": "序列化失败仍有合法 JSON body —— 不是空 body",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/tests/response.rs::the_fallback_body_is_still_valid_json"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P5-I21",
+      "statement": "鉴权提取失败返回 401/403 + 统一响应包",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/tests/middleware.rs::a_failed_identity_extraction_is_rejected",
+        "crates/nexus-api/tests/middleware.rs::the_rejection_uses_the_unified_response_shape"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P5-I22",
+      "statement": "鉴权成功后身份进入请求 Extension，handler 可取用",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/tests/middleware.rs::the_identity_reaches_the_handler"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P5-I23",
+      "statement": "nexus-api 不实现具体的 JWT 校验 —— 策略由上层注入",
+      "layer": "structure",
+      "verified_by": [
+        "crates/nexus-api/tests/architecture.rs::the_api_crate_does_not_implement_jwt_verification"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P5-I24",
+      "statement": "结构层：nexus-api 不依赖 nexus-repo / nexus-infra",
+      "layer": "structure",
+      "verified_by": [
+        "crates/nexus-api/tests/architecture.rs::the_api_crate_does_not_depend_on_the_data_layer"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P5-I25",
+      "statement": "结构层：nexus-api 的 Cargo.toml 不新增内部 crate 依赖",
+      "layer": "structure",
+      "verified_by": [
+        "crates/nexus-api/tests/architecture.rs::the_api_crate_adds_no_internal_dependencies"
+      ],
+      "status": "planned"
+    }
+  ],
+  "pipeline_order": [
+    "frame_encoding",
+    "frame_decoding",
+    "event_name_mapping",
+    "bridge_to_body",
+    "middleware_extraction",
+    "unified_response"
+  ],
+  "decisions": [
+    {
+      "id": "D8",
+      "decision": "SSE 输出手写 Body::from_stream，不用 axum 的 Sse 类型",
+      "basis": "docs/specs/p5/spec.md §6.1 —— 参考架构 §1.5 已定稿：axum 的 Sse 会自动转义 data，与前端 lib/sse.ts 的字节解析不一致",
+      "category": "decide-and-proceed"
+    },
+    {
+      "id": "D9",
+      "decision": "P5 的交付边界是传输层能力（trait 接缝），不做业务编排",
+      "basis": "docs/specs/p5/spec.md §6.2 —— nexus-service 是 7 行空壳；架构文档 §1.4 规定协议层不能感知业务规则；参考架构 §0.3 的 crate 职责表",
+      "category": "decide-and-proceed"
+    },
+    {
+      "id": "D10",
+      "decision": "鉴权的机制在 P5，策略在上层（IdentityExtractor trait 接缝）",
+      "basis": "docs/specs/p5/spec.md §6.3 —— nexus-security 是 7 行空壳；参考架构 §0.4 的 Go 版反例明确「权限由 service 注入」；与 P4 的 D4 同一条纪律",
+      "category": "decide-and-proceed"
+    },
+    {
+      "id": "D11",
+      "decision": "统一响应包的成功 code 是数字 0",
+      "basis": "docs/specs/p5/spec.md §6.4 —— 参考实现 internal/pkg/response 已定稿且前端已按 code==0 判成功；架构文档 §2.6.3 的验证记录要求 code 是数字以便前端按码段分支",
+      "category": "decide-and-proceed"
+    }
+  ],
+  "excluded": [
+    {
+      "item": "业务编排（会话保障 / 归属校验 / 上下文组装）",
+      "reason": "决策 D9 —— 属 nexus-service；架构文档 §1.4 规定协议层不能感知业务规则"
+    },
+    {
+      "item": "具体业务端点（KB / 工作流 / 记忆 / 模型管理）",
+      "reason": "属 P6/P7/P8；P5 只交付注册机制"
+    },
+    {
+      "item": "鉴权的具体策略（JWT 校验 / 配额判定）",
+      "reason": "决策 D10 —— nexus-security 是 7 行空壳，JWT 形态未定；P5 交付机制"
+    },
+    {
+      "item": "A2A 入站端点",
+      "reason": "属 P8（nexus-a2a）；架构文档 §4.3.1 已定稿 A2A 双向"
+    },
+    {
+      "item": "MCP 端点",
+      "reason": "属 P8（nexus-mcp）"
+    },
+    {
+      "item": "WebSocket / 长轮询",
+      "reason": "架构文档 §1.2 的 nexus serve 只有 REST + SSE + A2A"
+    },
+    {
+      "item": "FinishReason 增加 Canceled 变体",
+      "reason": "事件契约已定稿（§6.3）；P5 只登记为 F3（承接 P4 的 F2），不在实现里顺手决定"
+    },
+    {
+      "item": "优雅关停",
+      "reason": "属 nexus-cli（进程生命周期）"
+    }
+  ]
+}
