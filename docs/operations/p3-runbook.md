@@ -140,6 +140,66 @@
 > **`canceled` 单独计数** —— 便于区分「上游故障」与「用户取消」。
 > 把取消混进 `error` 会让错误率虚高。
 
+#### 怎么看到这些指标
+
+指标**产生**在 `nexus-observability::LlmMetrics`，**暴露**在 `nexus-api` 的
+`GET /metrics` 端点（NEX-25）。
+
+```text
+GET /metrics
+→ 200 OK
+→ Content-Type: text/plain; version=0.0.4; charset=utf-8
+```
+
+响应体是 Prometheus 文本格式：
+
+```text
+# HELP llm_requests_total LLM 请求总数
+# TYPE llm_requests_total counter
+llm_requests_total{provider="deepseek",status="ok"} 12
+# HELP llm_tokens_total LLM token 总数
+# TYPE llm_tokens_total counter
+llm_tokens_total{provider="deepseek",kind="prompt"} 1024
+```
+
+**采集**：Prometheus 抓取器直接指向该端点即可，无需 exporter 中转。
+
+```yaml
+scrape_configs:
+  - job_name: nexusagent
+    static_configs:
+      - targets: ["nexus-api:8080"]
+```
+
+#### ⚠️ 该端点**只应在内网暴露**
+
+`/metrics` **不要求鉴权** —— 这是有意的决策：
+
+- Prometheus 抓取器**通常**没有业务凭据 —— 加鉴权会让标准抓取配置复杂化；
+- 指标**不含**凭据（标签只有 `provider` / `status` / `kind`）——
+  所以未鉴权暴露的信息是**低敏**的。
+
+**代价**：任何能访问该端点的人都能看到供应商代号与请求量。
+所以它**必须**部署在内网 / 有网络策略限制的位置，
+**不要**直接暴露到公网。
+
+#### ⚠️ 指标里**不会有**凭据
+
+架构文档 §2.6.5 与「凭据不得进入埋点」的红线在这里是**类型级**保证：
+`LlmMetrics` 的写入方法（`record_request` / `record_tokens`）
+**签名上就不接受凭据类型** —— 标签只有 `provider` / `status` / `kind` 三个。
+
+#### ⚠️ 没有流量时，指标**不出现**
+
+`prometheus` 的 `Registry::gather()` 会**剪掉空 family**
+（没有样本的指标定义不输出）。
+
+所以刚启动、还没有任何请求时，`/metrics` 返回的是**空体** —— 不是 404，
+是 200 + 空内容。
+
+这不是缺陷，是标签口径的必然结果：标签值来自**运行期配置**
+（供应商代号），启动时无从得知。
+
 ### ⚠️ 成本**没有**核算
 
 `Usage.cost` **恒为 `None`**，且**没有** `llm_cost_total` 指标。
@@ -159,6 +219,7 @@
 | 「请求是否已到达上游」 | **网关层不可观测** —— 只有上游侧能回答 |
 | 「全局熔断状态」 | 熔断是单副本粒度 |
 | 「跨副本的配额使用」 | 属容量治理 |
+| 「OTel trace 的导出」 | `opentelemetry-otlp` 已在依赖里，但导出配置与后端属 P9 |
 
 ## 回滚
 
