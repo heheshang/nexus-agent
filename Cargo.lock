@@ -2265,6 +2265,7 @@ dependencies = [
  "nexus-security",
  "nexus-service",
  "serde_json",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
  "tokio-util",

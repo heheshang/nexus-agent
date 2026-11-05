@@ -1,7 +1,7 @@
 ---
 id: NEX-31
 title: "feat(api): 落地 SSE 帧编解码器与半帧缓冲"
-status: To Do
+status: Done
 assignee: []
 labels: [api, sse, p5]
 priority: high
@@ -56,19 +56,19 @@ TCP 分包可能把一帧劈成两半。读侧收到半帧就解析会得到**�
 
 ## Acceptance Criteria
 
-- [ ] #1 `crates/nexus-api/src/sse.rs` 实现 `encode_frame(event: &str, data: &Value) -> Vec<u8>`，输出**逐字节**等于 `"event: {name}\ndata: {json}\n\n"`
-- [ ] #2 编码器是**纯函数** —— 同样输入得到同样字节
-- [ ] #3 `crates/nexus-api/src/sse.rs` 实现**增量式**解码器 —— `push(chunk) -> Vec<Frame>`
-- [ ] #4 解码器**缓冲**不完整的尾部帧，缓冲字节数**可观测**（有 `buffered()` 之类的方法）
-- [ ] #5 分隔符**连同帧内容一起切走** —— 连续多帧解码后缓冲区**清空**（防死循环回归）
-- [ ] #6 解码器容忍 **CRLF 变体**（`\r\n\r\n` 分隔）
-- [ ] #7 空帧 / 既无 `event` 又无 `data` 的帧 → **返回错误**，不静默通过
-- [ ] #8 逐字节喂入测试：把一帧切成 N 片喂入，最终得到**完整**的一帧
-- [ ] #9 任意切分点测试：在帧的**每一个**字节位置切断，两次喂入后结果相同
-- [ ] #10 多行 `data:` 按 SSE 规范用 `\n` 连接
-- [ ] #11 注释行（心跳）被忽略
-- [ ] #12 断言用的是**字面量** —— 不是引用被测代码里的常量（NEX-25 的教训：同义反复）
-- [ ] #13 `cargo fmt --all --check` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo test --workspace --locked` 通过
+- [x] #1 `crates/nexus-api/src/sse.rs` 实现 `encode_frame(event: &str, data: &Value) -> Vec<u8>`，输出**逐字节**等于 `"event: {name}\ndata: {json}\n\n"`
+- [x] #2 编码器是**纯函数** —— 同样输入得到同样字节
+- [x] #3 `crates/nexus-api/src/sse.rs` 实现**增量式**解码器 —— `push(chunk) -> Vec<Frame>`
+- [x] #4 解码器**缓冲**不完整的尾部帧，缓冲字节数**可观测**（有 `buffered()` 之类的方法）
+- [x] #5 分隔符**连同帧内容一起切走** —— 连续多帧解码后缓冲区**清空**（防死循环回归）
+- [x] #6 解码器容忍 **CRLF 变体**（`\r\n\r\n` 分隔）
+- [x] #7 空帧 / 既无 `event` 又无 `data` 的帧 → **返回错误**，不静默通过
+- [x] #8 逐字节喂入测试：把一帧切成 N 片喂入，最终得到**完整**的一帧
+- [x] #9 任意切分点测试：在帧的**每一个**字节位置切断，两次喂入后结果相同
+- [x] #10 多行 `data:` 按 SSE 规范用 `\n` 连接
+- [x] #11 注释行（心跳）被忽略
+- [x] #12 断言用的是**字面量** —— 不是引用被测代码里的常量（NEX-25 的教训：同义反复）
+- [x] #13 `cargo fmt --all --check` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo test --workspace --locked` 通过
 
 ## DoR 判定
 
@@ -135,3 +135,57 @@ TCP 分包可能把一帧劈成两半。读侧收到半帧就解析会得到**�
   那样测的是「crate A 能否解析 crate A 的输出」，而不是「输出是否符合参考实现的字节格式」。
 - **可逆性**：高 —— 局部改动。
 - **影响面**：`crates/nexus-api/src/sse.rs`。
+
+## 实现过程中的发现
+
+### 发现 1 —— 心跳帧**不能**判成畸形帧（真实缺陷，初版踩到）
+
+初版把「既无 `event` 又无 `data`」一律判成 `MalformedFrame`。
+结果**心跳帧**（`: ping\n\n`，只有注释行）让 `push` 直接返回 `Err` ——
+**每隔一次心跳就中断整条流**。
+
+心跳是**保活**机制，让它打断连接是**完全相反**的效果。
+
+**修正**：`parse_frame` 的返回类型从 `Result<Frame, _>` 改成 `Result<Option<Frame>, _>`：
+- `Ok(None)` —— **纯注释帧**（心跳），被**跳过**；
+- `Err(MalformedFrame)` —— **真空帧**（`\n\n`，分隔符紧跟分隔符）或既无 `event` 又无 `data` 的非注释帧。
+
+⚠️ **「真空帧」与「纯注释帧」必须区分** —— 这是本任务最容易搞混的一处：
+前者是**畸形**，后者是**合法的心跳**。
+
+### 发现 2 —— `find_delimiter` 必须比较**位置**而非只认一种分隔符
+
+LF（`\n\n`）与 CRLF（`\r\n\r\n`）都要认，且要取**更早**的那个。
+只找一种会在另一种出现时把缓冲区切错位置。
+
+### 发现 3 —— `drain(..pos)` 之后**还要** `drain(..delim_len)`
+
+用 `split_to` 的写法（`examples/demo-sse-frames`）一次切走「内容 + 分隔符」。
+用 `drain` 两次切是等价的，但**两次切更容易写漏** —— 漏掉第二次就
+让分隔符留在缓冲区头部（发现 4 的注入正是这一处）。
+
+### 发现 4 —— **故障注入**验证（6 项，全部**确实会红**）
+
+| 注入 | 结果 |
+|---|---|
+| 帧尾分隔符少一个 `\n` | FAILED（10 passed / 4 failed）✓ |
+| `event:` 后**两个**空格 | FAILED（11 passed / 3 failed）✓ |
+| **分隔符不切走**（死循环回归） | FAILED（9 passed / 5 failed）✓ |
+| 半帧**丢弃**而非缓冲 | FAILED（8 passed / 6 failed）✓ |
+| **不识别** CRLF 变体 | FAILED（13 passed / 1 failed）✓ |
+| 畸形帧**静默通过** | FAILED（13 passed / 1 failed）✓ |
+
+恢复后：`14 passed / 0 failed`。
+
+### 发现 5 —— 「测试存在」不等于「断言真的有效」
+
+第 4 项注入（分隔符不切走）会让 `push` **死循环** ——
+旧实现下那个测试会**挂住**而不是失败。
+所以「缓冲区清空」这条断言同时是**实现不会退化**的保证。
+
+### 验证结果
+
+- `cargo test -p nexus-api`：14 个新测试 + 7 个既有测试全绿
+- `cargo fmt --all --check` 通过
+- `cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警
+- `scripts/check-specs.sh` 通过（P5-I01..I09 已升格为 `verified`）

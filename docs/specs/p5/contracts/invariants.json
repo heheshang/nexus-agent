@@ -81,7 +81,7 @@
       "verified_by": [
         "crates/nexus-api/src/sse.rs::a_partial_frame_is_buffered_not_emitted"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P5-I02",
@@ -90,7 +90,7 @@
       "verified_by": [
         "crates/nexus-api/src/sse.rs::a_byte_by_byte_feed_reassembles_the_frame"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P5-I03",
@@ -99,7 +99,7 @@
       "verified_by": [
         "crates/nexus-api/src/sse.rs::every_split_point_reassembles_identically"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P5-I04",
@@ -108,7 +108,7 @@
       "verified_by": [
         "crates/nexus-api/src/sse.rs::consecutive_frames_leave_the_buffer_empty"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P5-I05",
@@ -117,7 +117,7 @@
       "verified_by": [
         "crates/nexus-api/src/sse.rs::the_encoded_frame_matches_the_reference_bytes"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P5-I06",
@@ -126,7 +126,7 @@
       "verified_by": [
         "crates/nexus-api/src/sse.rs::a_malformed_frame_is_rejected"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P5-I07",
@@ -135,7 +135,7 @@
       "verified_by": [
         "crates/nexus-api/src/sse.rs::a_crlf_variant_is_accepted"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P5-I08",
@@ -144,7 +144,7 @@
       "verified_by": [
         "crates/nexus-api/src/sse.rs::multiline_data_is_joined_with_a_newline"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P5-I09",
@@ -153,7 +153,7 @@
       "verified_by": [
         "crates/nexus-api/src/sse.rs::a_comment_line_is_ignored"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P5-I10",
