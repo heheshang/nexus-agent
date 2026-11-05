@@ -175,6 +175,8 @@ references:
 |---|---|
 | `scripts/check-backlog.sh` | 新增**规则 3**（DoR 判定段落必填）+ **规则 3b**（豁免名单无后门） |
 | `backlog/README.md` | 模板标注 `## DoR 判定` 为**必填**；写明「写不出判定怎么办」；豁免名单说明 |
+| `backlog/tasks/.gitkeep` | 让 `tasks/` 目录在仓库里持续存在（见发现 5、6） |
+| `docs/ai-sdlc/metrics-snapshot-2026-11.md` | 待办 1 的完成记录 + **DoR 分母的口径**说明 |
 
 **不改动任何 Rust 代码** —— 纯流程/脚本层改动。
 
@@ -268,6 +270,63 @@ scripts/check-backlog.sh: line 144: id�: unbound variable
 > 注入 2 的**两轮**是本任务最重要的一段：
 > 第一轮暴露了「3b 还不够」，第二轮才证明「补上之后能拦住」。
 > 如果第一轮就认为「注入没红 = 没问题」，那个后门就会**带着一个全绿的门禁**进入 `main`。
+
+### 发现 5 —— 归档完最后两个任务，**另一个门禁**红了
+
+NEX-24 与 NEX-25 是 `backlog/tasks/` 里**最后两个**任务。它们归档后，
+`backlog/tasks/` 目录**从文件系统消失了** —— git **不跟踪空目录**。
+
+而 `.cursor/rules/` 里有**三条**规则引用了 `backlog/tasks/` 这个路径：
+
+- `ai-sdlc-workflow.mdc` §6 相关文件
+- `ai-sdlc-artifacts.mdc` §1（Tier 3 载体）与 §3（目录约定）
+- `ai-sdlc-implementation.mdc` §4（任务号必须实际存在）
+
+`scripts/check-rules.sh` 规则 2 校验「规则中引用的仓库路径真实存在」，
+所以目录一消失，门禁就红 —— 而且是**看起来毫不相关**的红。
+
+修法：`backlog/tasks/.gitkeep`（git 社区约定名），让目录结构本身成为**被追踪**的东西。
+
+### ⚠️ 发现 6 —— **本地绿是假象**，只有全新 clone 才暴露
+
+修完之后，本地 `check-rules.sh` **全绿**。
+
+但那个绿是**假的** —— 因为**本地目录还在**（git 曾经跟踪过它，
+`git mv` 移走了里面的文件，但空目录本身在本地工作区残留）。
+
+所以做了一次**全新 clone** 验证：
+
+```bash
+git clone --no-hardlinks . /tmp/clone-test
+ls -la /tmp/clone-test/backlog/
+# → 只有 completed/ 与 README.md，**没有 tasks/**
+```
+
+**缺陷坐实**：仓库层面 `backlog/tasks/` 根本不存在，
+CI（每次都从干净 checkout 开始）**必然**红。
+
+加上 `.gitkeep` 并提交后，再 clone 一次：
+
+```bash
+ls -la /tmp/clone-test/backlog/
+# → tasks/ 存在
+cd /tmp/clone-test && bash scripts/check-rules.sh
+# → ✓ 全部检查通过
+```
+
+### 一条重要的方法论教训
+
+**「本地门禁全绿」不等于「仓库是好的」。**
+
+这个缺陷的形态是：**本地工作区状态掩盖了仓库状态**。
+删掉文件 ≠ 从 git 里删除 —— 目录的空与非空是**两个维度**，
+而 git 只追踪后者。
+
+这类缺陷**只有**「从干净检出重建」才能暴露。
+
+所以：**验证仓库层面的改动，必须用全新 clone，不能用本地工作区。**
+（这与「验证门禁必须注入故障」是同一条原则的两个面 ——
+一个验证「规则本身对不对」，一个验证「仓库本身对不对」。）
 
 ### 临时文件的清理
 
