@@ -4,6 +4,7 @@
 //!
 //! | 能力 | 模块 |
 //! |---|---|
+//! | **统一响应包** —— `{"code": 0, "message": "ok", "data"?}` | [`response`] |
 //! | **协议层错误响应** —— 只序列化 `UserFacing`（`code` + `message`） | [`error`] |
 //! | **`GET /metrics`** —— Prometheus 文本格式的指标端点 | [`metrics`] |
 //! | **SSE 帧编解码** —— 逐字节对齐参考实现 + **半帧缓冲** | [`sse`] |
@@ -25,13 +26,15 @@
 //!
 //! - `/metrics` 端点（NEX-25）—— 让 NEX-23 产生的网关指标**先可见**；
 //! - SSE 帧编解码器（NEX-31）—— **半帧缓冲**是 SSE 协议里唯一真正会出错的地方；
-//! - SSE 桥接（NEX-32）—— 12 个事件名映射 + 断开即取消。
+//! - SSE 桥接（NEX-32）—— 12 个事件名映射 + 断开即取消；
+//! - 统一响应包（NEX-33）—— 成功 `code == 0`，失败用业务码。
 //!
 //! 鉴权中间件与路由骨架属 P5 的其余任务。
 
 pub mod bridge;
 pub mod error;
 pub mod metrics;
+pub mod response;
 pub mod sse;
 
 pub use bridge::{
@@ -39,6 +42,7 @@ pub use bridge::{
 };
 pub use error::ApiError;
 pub use metrics::{METRICS_CONTENT_TYPE, METRICS_PATH, MetricsState, metrics_router};
+pub use response::{ApiResponse, SUCCESS_CODE, SUCCESS_MESSAGE};
 pub use sse::{Frame, FrameDecoder, FrameError, encode_frame, ping};
 
 /// crate 版本号，便于运行时自检与日志标注。

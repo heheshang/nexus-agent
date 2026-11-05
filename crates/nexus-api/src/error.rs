@@ -9,10 +9,19 @@
 //! | **传输错误** | `axum` 的 `IntoResponse` | **协议层** |
 //!
 //! 本 crate 是**协议层**，所以「响应体长什么样」由这里决定。
+//!
+//! # 响应体形状由 [`crate::response`] 决定
+//!
+//! 本模块**不自己**定义响应形状 —— 它复用统一响应包
+//! （[`ApiResponse`]），这样 REST 端点的成功与失败响应**形状一致**。
+//!
+//! 形状：`{"code": <业务码>, "message": "..."}`（失败时无 `data`）。
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use nexus_core::{AppError, ErrorCode};
+
+use crate::response::ApiResponse;
 
 /// 协议层的错误响应。
 ///
@@ -39,6 +48,24 @@ impl ApiError {
         }
     }
 
+    /// 构造一个**业务错误**（带**面向用户**的文案）。
+    ///
+    /// ⚠️ `message` 会**原样**进入响应体 ——
+    /// **绝不能**把内部原因传进来。
+    pub fn business(code: ErrorCode, message: impl Into<std::borrow::Cow<'static, str>>) -> Self {
+        Self {
+            inner: AppError::new(code, message),
+        }
+    }
+
+    /// 从 `AppError` 构造。
+    ///
+    /// 这是**唯一**能把领域/应用层错误带进协议层的入口 ——
+    /// 它只取 `UserFacing`，`cause` **没有**外泄的路径。
+    pub fn from_app_error(err: AppError) -> Self {
+        Self { inner: err }
+    }
+
     /// 业务码。
     pub fn code(&self) -> ErrorCode {
         self.inner.facing.code
@@ -53,14 +80,7 @@ impl IntoResponse for ApiError {
 
         // ⚠️ 只序列化 `UserFacing` —— `AppError` 不实现 `Serialize`，
         // 所以「不小心把内部原因发出去」在**类型上**就不可能。
-        let body = serde_json::to_vec(facing).unwrap_or_else(|_| {
-            // 理论上不可达（`UserFacing` 的字段都是平凡类型）。
-            // 但兜底**必须有** —— 一个空 body 会让客户端拿到 0 字节，
-            // 那比一个格式错误的 body 更难排查。
-            // ⚠️ 不能用 `br#"..."#` —— 字节串字面量**必须**是 ASCII，
-            // 而兜底消息是中文。
-            r#"{"code":90001,"message":"系统内部错误"}"#.as_bytes().to_vec()
-        });
+        let body = ApiResponse::from_facing(facing).to_bytes();
 
         (
             status,
