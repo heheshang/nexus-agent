@@ -111,15 +111,32 @@ echo "── 规则 3：contracts/ 的不变量引用的测试必须真的存在
 #   <文件路径>::<测试名>
 # 然后在对应文件里 grep 该测试名。文件路径可能带 `::` 形式的模块限定，
 # 也可能是裸测试名（如 `crates/nexus-llm/src/retry.rs` 指向模块内全部测试）。
+#
+# ⚠️ `status` 字段区分两种状态（规则 3b 会强制它归零）：
+#
+#   verified —— 证据**已**产生。此时引用的测试必须**真的存在**。
+#   planned —— 证据**待**产生（Spec 阶段先于实现阶段的必然中间态）。
+#               此时不强制存在 —— 但 Spec 一旦归档，规则 3b 会要求它升格。
+#
+# 为什么需要 `planned`：
+# AI-SDLC 规定 S2（产出物编写）**先于** S4（实现）——
+# 所以契约声明**必然先于**证据产生。若规则 3 一律要求测试存在，
+# Spec 就**无法**在实现之前落盘 —— 而那正是流程要求的顺序。
+#
+# P3 之所以没暴露这个问题：它的 Spec 是实现**之后**才补的
+# （9e620dd 在 4cd6c31 之后），规则 3 一开始就能全绿 —— 因为证据早就存在了。
 missing_tests=0
 for f in "$SPEC_ROOT"/*/contracts/*.json; do
     [ -e "$f" ] || continue
-    # 提取 verified_by 数组里的每一项
+    # 提取 verified_by 数组里的每一项 —— **只取 status == verified 的**
     entries=$(python3 - "$f" <<'PY'
 import json, sys
 with open(sys.argv[1]) as fh:
     doc = json.load(fh)
 for inv in doc.get("invariants", []):
+    # `status` 缺省视为 `verified`（P3 的既有契约没有这个字段）。
+    if inv.get("status", "verified") != "verified":
+        continue
     for v in inv.get("verified_by", []):
         if "::" in v:
             print(v)
@@ -142,6 +159,66 @@ PY
 done
 if [ "$missing_tests" -eq 0 ]; then
     echo "  ✓ 契约引用的测试全部存在"
+else
+    fail=1
+fi
+
+echo ""
+echo "── 规则 3b：已完成的 Spec 不得残留 planned 不变量 ──"
+# 这是规则 3 的**归零约束**。
+#
+# `planned` 是「契约已声明、证据待产生」的中间态 —— S2 必须先于 S4，
+# 所以它**必然**存在。但它**不能永久停留**：
+# 「先声明契约，证据永远不补」的漏洞比「没有契约」更坏，
+# 因为门禁**看起来**是绿的。
+#
+# 归零的触发条件：**该 Spec 的全部任务都已归档**
+# （即 tasks.md 里引用的每个 NEX-nn 都在 backlog/completed/ 下）。
+# 到那时，证据**必须**已经产生 —— 不存在「任务做完了但测试没写」这种合法状态。
+#
+# ⚠️ 为什么用「任务全部归档」而不是「Spec 目录里有别的标记」：
+# 任务归档是**既有的**、已验证的交付信号（`check-backlog.sh` 校验它的 status），
+# 复用它意味着**不引入新的状态**。
+planned_left=0
+for dir in "$SPEC_ROOT"/*/; do
+    [ -d "$dir" ] || continue
+    name="$(basename "$dir")"
+    tasks_file="$dir/tasks.md"
+    [ -f "$tasks_file" ] || continue
+
+    # 该 Spec 的全部任务都已归档？
+    nex_ids=$(grep -oE 'NEX-[0-9]+' "$tasks_file" | sort -u || true)
+    [ -n "$nex_ids" ] || continue
+    all_done=1
+    for n in $nex_ids; do
+        if ! ls backlog/completed/"$n"*.md >/dev/null 2>&1; then
+            all_done=0
+            break
+        fi
+    done
+    [ "$all_done" -eq 1 ] || continue
+
+    # 全部归档了 —— 那就不该再有 planned
+    for f in "$dir"contracts/*.json; do
+        [ -e "$f" ] || continue
+        result=$(python3 - "$f" <<'PY' || true
+import json, sys
+
+with open(sys.argv[1]) as fh:
+    doc = json.load(fh)
+for inv in doc.get("invariants", []):
+    if inv.get("status", "verified") == "planned":
+        print(f"{inv.get('id', '?')}: {inv.get('statement', '')}")
+PY
+)
+        if [ -n "$result" ]; then
+            echo "$result" | sed "s|^|  ✗ ${name}/$(basename "$f")：任务已全部归档，但该不变量仍是 planned → |"
+            planned_left=$((planned_left + 1))
+        fi
+    done
+done
+if [ "$planned_left" -eq 0 ]; then
+    echo "  ✓ 已完成的 Spec 没有残留 planned 不变量"
 else
     fail=1
 fi
@@ -204,26 +281,54 @@ else
 fi
 
 echo ""
-echo "── 规则 5：nexus-llm 只使用白名单内的错误码 ──"
+echo "── 规则 5：各 Spec 的 crate 只使用本 Spec 白名单内的错误码 ──"
 # 新增码值是 §6.3 已定稿条款的破坏性变更 —— 必须在 Spec 契约里显式登记，
 # 而不是悄悄出现在实现里。
+#
+# ⚠️ 必须**逐 Spec 判定**（用本 Spec 自己的白名单），
+# 不能用所有白名单的**并集** —— 并集会让一个 Spec 的 crate
+# 悄悄使用另一个 Spec 的码而不被察觉。
 used_outside=0
-whitelist_variants=$(python3 - "$SPEC_ROOT"/*/contracts/error-codes.json <<'PY'
+for dir in "$SPEC_ROOT"/*/; do
+    [ -d "$dir" ] || continue
+    name="$(basename "$dir")"
+    codes_file="$dir/contracts/error-codes.json"
+    [ -f "$codes_file" ] || continue
+
+    # 该 Spec 对应的 crate —— 从 invariants.json 的 `crate` 字段读。
+    # ⚠️ 必须**逐 Spec 判定**，不能用所有白名单的并集 ——
+    # 并集会让 P4 的 crate 悄悄用 P3 的码而不被察觉。
+    #
+    # ⚠️ `crate` 字段的值是 crate **名**（如 `nexus-agent`），
+    # 而源码在 `crates/<name>/src`。必须补上前缀 ——
+    # 少了这一步，`[ -d "$crate/src" ]` 恒为假，规则会**静默跳过整个 Spec**。
+    # 那正是「看起来全绿，实际什么都没拦住」的失效形态。
+    crate_name=$(python3 - "$dir"contracts/invariants.json <<'PY' 2>/dev/null || true
 import json, sys
-variants = set()
-for path in sys.argv[1:]:
-    try:
-        with open(path) as fh:
-            doc = json.load(fh)
-    except (OSError, json.JSONDecodeError):
-        continue
-    for entry in doc.get("whitelist", []):
-        variants.add(entry["variant"])
-print("\n".join(sorted(variants)))
+try:
+    with open(sys.argv[1]) as fh:
+        print(json.load(fh).get("crate", ""))
+except (OSError, json.JSONDecodeError):
+    pass
 PY
 )
-for crate in crates/nexus-llm; do
+    [ -n "$crate_name" ] || continue
+    crate="crates/$crate_name"
     [ -d "$crate/src" ] || continue
+
+    # 只取**本 Spec** 的白名单
+    own_variants=$(python3 - "$codes_file" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1]) as fh:
+        doc = json.load(fh)
+except (OSError, json.JSONDecodeError):
+    sys.exit(0)
+print("\n".join(sorted(e["variant"] for e in doc.get("whitelist", []))))
+PY
+)
+    [ -n "$own_variants" ] || continue
+
     # ⚠️ 必须**剥离注释**再扫描 ——
     # 文档注释里解释「委托给 `nexus-core::ErrorCode::retry_policy()`」
     # 是正常文字，不是「使用了这个错误码」。
@@ -234,14 +339,14 @@ for crate in crates/nexus-llm; do
         | grep -ohE 'ErrorCode::[A-Za-z]+' 2>/dev/null \
         | sed 's/ErrorCode:://' | sort -u || true)
     for v in $used; do
-        if ! echo "$whitelist_variants" | grep -qx "$v"; then
-            echo "  ✗ nexus-llm 使用了白名单外的错误码：$v"
+        if ! echo "$own_variants" | grep -qx "$v"; then
+            echo "  ✗ ${name}（${crate}）使用了本 Spec 白名单外的错误码：$v"
             used_outside=$((used_outside + 1))
         fi
     done
 done
 if [ "$used_outside" -eq 0 ]; then
-    echo "  ✓ nexus-llm 未使用白名单外的错误码"
+    echo "  ✓ 各 Spec 的 crate 未使用本 Spec 白名单外的错误码"
 else
     fail=1
 fi

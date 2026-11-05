@@ -1,0 +1,270 @@
+{
+  "$schema": "nexus-agent/spec-contract/v1",
+  "spec": "p4",
+  "specRef": "docs/specs/p4/spec.md",
+  "phase": "P4",
+  "crate": "nexus-agent",
+
+  "$comment": [
+    "P4 的不变量契约。",
+    "",
+    "status 语义（scripts/check-specs.sh 规则 3）：",
+    "  verified —— 该不变量**已有**证据；verified_by 指向的测试必须**真的存在**。",
+    "  planned —— 该不变量已**声明**，证据将在对应 Task 落地时产生；",
+    "              此时 verified_by 指向的测试文件可能还不存在。",
+    "",
+    "「planned 不等于可以糊弄」：规则 3b 会在该 Spec 的**全部任务都归档**后",
+    "要求所有 planned 提升为 verified —— 届时测试必须存在，否则门禁红。",
+    "",
+    "这解决了 S2 必须先于 S4 的顺序问题：Spec 在实现之前落盘，",
+    "契约声明**先于**证据产生，但证据缺失时门禁**不会**因此被绕过。"
+  ],
+
+  "error_codes": {
+    "$comment": "P4 复用的 nexus-core 已定稿业务码 —— 不得新增，不得改值。",
+    "source": "crates/nexus-core/src/error.rs",
+    "allowed": [
+      { "code": 30002, "variant": "MaxIteration", "http": 500, "retry": "Terminal", "p4_use": "超出迭代上限" },
+      { "code": 30006, "variant": "BudgetExceeded", "http": 500, "retry": "Terminal", "p4_use": "裁剪后仍超预算" },
+      { "code": 10001, "variant": "InvalidParam", "http": 400, "retry": "Terminal", "p4_use": "工具调用协议非法（ID 缺失/重复/配对断裂）" },
+      { "code": 70001, "variant": "ToolNotFound", "http": 404, "retry": "Terminal", "p4_use": "工具不存在" },
+      { "code": 70002, "variant": "ToolFailed", "http": 500, "retry": "UnknownOutcome", "p4_use": "工具执行失败（结构化回灌）" },
+      { "code": 70003, "variant": "ToolTimeout", "http": 504, "retry": "UnknownOutcome", "p4_use": "工具执行超时" },
+      { "code": 50001, "variant": "ModelUnavailable", "http": 502, "retry": "Retryable", "p4_use": "模型调用失败" },
+      { "code": 50002, "variant": "ModelTimeout", "http": 504, "retry": "UnknownOutcome", "p4_use": "单步/总超时" },
+      { "code": 90001, "variant": "Internal", "http": 500, "retry": "Terminal", "p4_use": "内部状态不一致" },
+      { "code": 90003, "variant": "ServiceUnavailable", "http": 503, "retry": "Retryable", "p4_use": "运行被取消" }
+    ]
+  },
+
+  "invariants": [
+    {
+      "id": "P4-I01",
+      "statement": "协议完整性：孤立的 tool_result（无对应 tool_call）被拒绝，返回 InvalidParam",
+      "layer": "behavior",
+      "verified_by": ["crates/nexus-agent/src/protocol.rs::an_unpaired_tool_result_is_rejected"],
+      "status": "planned"
+    },
+    {
+      "id": "P4-I02",
+      "statement": "协议完整性：缺失 tool_result（tool_call 没有对应结果）被拒绝",
+      "layer": "behavior",
+      "verified_by": ["crates/nexus-agent/src/protocol.rs::a_missing_tool_result_is_rejected"],
+      "status": "planned"
+    },
+    {
+      "id": "P4-I03",
+      "statement": "协议完整性：重复的 tool_call ID 被拒绝",
+      "layer": "behavior",
+      "verified_by": ["crates/nexus-agent/src/protocol.rs::a_duplicate_tool_call_id_is_rejected"],
+      "status": "planned"
+    },
+    {
+      "id": "P4-I04",
+      "statement": "协议完整性校验先于裁剪 —— 配对断裂时即使超预算，报的也是配对错误而非预算错误",
+      "layer": "behavior",
+      "verified_by": ["crates/nexus-agent/src/compaction.rs::the_pairing_check_runs_before_the_budget_check"],
+      "status": "planned"
+    },
+    {
+      "id": "P4-I05",
+      "statement": "整轮淘汰保留所有 system 消息",
+      "layer": "behavior",
+      "verified_by": ["crates/nexus-agent/src/compaction.rs::all_system_messages_are_retained"],
+      "status": "planned"
+    },
+    {
+      "id": "P4-I06",
+      "statement": "整轮淘汰保留最新一轮 user 消息",
+      "layer": "behavior",
+      "verified_by": ["crates/nexus-agent/src/compaction.rs::the_latest_user_turn_is_retained"],
+      "status": "planned"
+    },
+    {
+      "id": "P4-I07",
+      "statement": "整轮淘汰按**整轮**删除 —— 该轮的所有并行工具结果一起被删，不留孤立 tool_result",
+      "layer": "behavior",
+      "verified_by": ["crates/nexus-agent/src/compaction.rs::a_whole_turn_is_evicted_with_its_parallel_tool_results"],
+      "status": "planned"
+    },
+    {
+      "id": "P4-I08",
+      "statement": "裁剪不生成摘要 —— 保留的消息是原样，未新增任何摘要消息",
+      "layer": "behavior",
+      "verified_by": ["crates/nexus-agent/src/compaction.rs::no_summary_message_is_generated"],
+      "status": "planned"
+    },
+    {
+      "id": "P4-I09",
+      "statement": "裁剪是纯函数 —— 入参未被修改，同输入同输出",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-agent/src/compaction.rs::compaction_is_pure",
+        "crates/nexus-agent/src/compaction.rs::compaction_does_not_mutate_the_input"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P4-I10",
+      "statement": "裁剪的双向边界都被测试：恰好在预算内通过，超出即返回 BudgetExceeded",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-agent/src/compaction.rs::a_history_that_exactly_fits_is_accepted",
+        "crates/nexus-agent/src/compaction.rs::an_oversized_history_is_rejected"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P4-I11",
+      "statement": "ReAct 循环跑通至少两轮：模型要求工具 → 工具执行 → 结果回灌 → 模型给出最终答案",
+      "layer": "behavior",
+      "verified_by": ["crates/nexus-agent/tests/react_loop.rs::the_loop_runs_a_tool_turn_and_then_answers"],
+      "status": "planned"
+    },
+    {
+      "id": "P4-I12",
+      "statement": "迭代上限生效：超出 max_iterations 时以 MaxIteration（30002）终止",
+      "layer": "behavior",
+      "verified_by": ["crates/nexus-agent/tests/react_loop.rs::the_iteration_limit_stops_the_loop_with_max_iteration"],
+      "status": "planned"
+    },
+    {
+      "id": "P4-I13",
+      "statement": "单步超时生效：单次模型调用超时以 ModelTimeout（50002）终止",
+      "layer": "behavior",
+      "verified_by": ["crates/nexus-agent/tests/react_loop.rs::the_per_step_timeout_stops_the_loop"],
+      "status": "planned"
+    },
+    {
+      "id": "P4-I14",
+      "statement": "总超时生效：整个运行超时以 ModelTimeout（50002）终止",
+      "layer": "behavior",
+      "verified_by": ["crates/nexus-agent/tests/react_loop.rs::the_overall_timeout_stops_the_loop"],
+      "status": "planned"
+    },
+    {
+      "id": "P4-I15",
+      "statement": "工具失败**结构化回灌**且**不终止**循环 —— 错误作为 tool 角色消息回灌，模型仍能给出答案",
+      "layer": "behavior",
+      "verified_by": ["crates/nexus-agent/tests/react_loop.rs::a_failing_tool_is_reported_back_to_the_model_without_stopping_the_loop"],
+      "status": "planned"
+    },
+    {
+      "id": "P4-I16",
+      "statement": "工具输出是**数据**不是指令 —— 回灌时是 tool 角色消息，不是 assistant 消息",
+      "layer": "behavior",
+      "verified_by": ["crates/nexus-agent/tests/react_loop.rs::tool_output_is_replayed_as_a_tool_message_not_an_assistant_message"],
+      "status": "planned"
+    },
+    {
+      "id": "P4-I17",
+      "statement": "工具并发限流生效 —— 同一轮内同时执行的工具数不超过上限",
+      "layer": "behavior",
+      "verified_by": ["crates/nexus-agent/tests/react_loop.rs::the_tool_concurrency_limit_is_enforced"],
+      "status": "planned"
+    },
+    {
+      "id": "P4-I18",
+      "statement": "事件序号严格单调、无重复、无空洞（并发工具调用下）",
+      "layer": "behavior",
+      "verified_by": ["crates/nexus-agent/tests/events.rs::the_event_sequence_is_strictly_monotonic_under_concurrent_tool_calls"],
+      "status": "planned"
+    },
+    {
+      "id": "P4-I19",
+      "statement": "终态事件**必达**、增量**可丢** —— 填满增量通道后终态仍然送达",
+      "layer": "behavior",
+      "verified_by": ["crates/nexus-agent/tests/events.rs::the_terminal_event_is_delivered_when_the_lossy_channel_is_full"],
+      "status": "planned"
+    },
+    {
+      "id": "P4-I20",
+      "statement": "背压超时**主动取消**整个运行，而不是无限阻塞",
+      "layer": "behavior",
+      "verified_by": ["crates/nexus-agent/tests/events.rs::backpressure_cancels_the_run_instead_of_blocking_forever"],
+      "status": "planned"
+    },
+    {
+      "id": "P4-I21",
+      "statement": "取消的终态是 done 而非 error —— 取消不是失败",
+      "layer": "behavior",
+      "verified_by": ["crates/nexus-agent/tests/react_loop.rs::a_cancelled_run_ends_with_done_not_error"],
+      "status": "planned"
+    },
+    {
+      "id": "P4-I22",
+      "statement": "先固化错误再取消 —— 供应商失败不会被 cancel 覆盖成「用户取消」",
+      "layer": "behavior",
+      "verified_by": ["crates/nexus-agent/tests/react_loop.rs::the_original_error_is_preserved_before_cancelling"],
+      "status": "planned"
+    },
+    {
+      "id": "P4-I23",
+      "statement": "结构层：nexus-agent 内部用泛型 + 静态分发（源码不含 Box<dyn ChatModel>）",
+      "layer": "structure",
+      "verified_by": ["crates/nexus-agent/tests/architecture.rs::the_agent_crate_does_not_use_dyn_dispatch_for_the_chat_model"],
+      "status": "planned"
+    },
+    {
+      "id": "P4-I24",
+      "statement": "结构层：nexus-agent 不依赖 nexus-repo / nexus-service / nexus-api",
+      "layer": "structure",
+      "verified_by": ["crates/nexus-agent/tests/architecture.rs::the_agent_crate_does_not_depend_on_the_upper_layers"],
+      "status": "planned"
+    },
+    {
+      "id": "P4-I25",
+      "statement": "工具输出超长被截断 —— 一个返回巨量输出的工具不会撑爆上下文预算",
+      "layer": "behavior",
+      "verified_by": ["crates/nexus-agent/src/tools.rs::an_oversized_tool_output_is_truncated"],
+      "status": "planned"
+    }
+  ],
+
+  "pipeline_order": [
+    "protocol_pairing_validation",
+    "context_compaction",
+    "model_call",
+    "output_validation",
+    "tool_execution",
+    "tool_result_replay"
+  ],
+
+  "decisions": [
+    {
+      "id": "D4",
+      "decision": "nexus-agent 自定义 ChatModel trait，方法签名复用 nexus-llm 的数据类型；Gateway 经 trait 注入，不引用具体类型",
+      "basis": "docs/specs/p4/spec.md §6.1 —— 参考架构 §2.2 的禁令对象是具体 Gateway 实现类型；check-deps.sh 已允许 agent → llm；零类型重复；不动已交付的 P3 代码",
+      "category": "decide-and-proceed"
+    },
+    {
+      "id": "D5",
+      "decision": "上下文裁剪用整轮淘汰，不生成摘要",
+      "basis": "docs/specs/p4/spec.md §6.2 —— 可验证性（摘要的正确性不可断言）/ 避免事实漂移 / 不放大 prompt injection 面",
+      "category": "decide-and-proceed"
+    },
+    {
+      "id": "D6",
+      "decision": "迭代上限 / 超时 / 工具并发上限由调用方传入，nexus-agent 不内置默认值",
+      "basis": "docs/specs/p4/spec.md §6.4 —— 缺省值会让「没配」与「配成 0」无法区分",
+      "category": "decide-and-proceed"
+    },
+    {
+      "id": "D7",
+      "decision": "P4 自定义异步事件 sink，不复用 nexus-core::EventSink",
+      "basis": "docs/specs/p4/spec.md §6.5 —— nexus-core 的是同步单写者，P4 需要并发生产者 + 背压 + 单点分配序号",
+      "category": "decide-and-proceed"
+    }
+  ],
+
+  "excluded": [
+    { "item": "协议类型下沉到 nexus-model", "reason": "决策 D4 的后续任务 F1 —— 触发条件是 P8（nexus-tool 需要同一套类型）" },
+    { "item": "SSE 桥接 / 半帧处理", "reason": "属 P5（nexus-api）" },
+    { "item": "危险工具的授权边界", "reason": "属 P8（nexus-tool / nexus-mcp）" },
+    { "item": "Schema 子集白名单校验", "reason": "属 P8；P4 只把 parameters 原样透传给模型" },
+    { "item": "Checkpoint / 中断恢复", "reason": "属 P6（nexus-workflow + nexus-execution）" },
+    { "item": "长期记忆召回 / RAG 组装", "reason": "属 P7；P4 的输入历史由调用方组装好传入" },
+    { "item": "FinishReason 增加 Canceled 变体", "reason": "决策：事件契约已定稿（§6.3），P4 用 done + Stop 表达取消；缺口登记为后续任务 F2" },
+    { "item": "真实上游连通性", "reason": "P4 不依赖真实模型服务；用本地 mock 测" }
+  ]
+}

@@ -2011,7 +2011,7 @@ cd <nexus-agent>/examples && cargo run -p demo-lease-fencing
 | **P1 核心类型** | `nexus-core` 的类型：取消语义、事件、错误 | 负向测试通过 | ✅ 完成（11 个负向用例 + 9 个跨模块契约测试） |
 | **P2 基础设施** | `nexus-infra`（PG/Redis/S3/Milvus）、`nexus-repo` | 迁移可应用、集成测试绿 | ✅ 完成（NEX-8..14；19 张 Phase 0 表在**空库**上可应用且可重复执行，50 个集成测试在 PostgreSQL 17 上全绿，CI 有 PG `services:` 且**真跑**集成测试） |
 | **P3 LLM 网关** | `nexus-llm`：供应商、预算、重试、熔断 | 预算裁剪与回退边界有测试 | ✅ 完成（NEX-16..19；9 个协议类型 + 预算裁剪 + 重试退避 + 熔断 + OpenAI 兼容客户端 + 网关回退边界，88 个测试；**熔断是单副本粒度** —— 见 §4.3） |
-| **P4 Agent 运行时** | `nexus-agent`：ReAct、上下文预算 | ReAct 循环有测试 | ⬜ |
+| **P4 Agent 运行时** | `nexus-agent`：ReAct、上下文预算 | ReAct 循环有测试 | 🚧 进行中（Spec 已落盘：`docs/specs/p4/`；NEX-26~30 待开工） |
 | **P5 协议层** | `nexus-api`：REST + SSE | SSE 半帧处理有测试 | ⬜ |
 | **P6 工作流** | `nexus-workflow` + `nexus-execution` | 租约、fencing、审批恢复有测试 | ⬜ |
 | **P7 知识与记忆** | `nexus-rag`、`nexus-memory` | 混合检索降级路径有测试 | ⬜ |

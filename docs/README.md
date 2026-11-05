@@ -52,6 +52,11 @@
 | [`specs/p3/tasks.md`](specs/p3/tasks.md) | P3 的任务清单（`T-NNN` ↔ `NEX-nn` 一一对应） |
 | [`specs/p3/contracts/invariants.json`](specs/p3/contracts/invariants.json) | P3 的机器可读不变量（每条指向一个**真实存在的测试**） |
 | [`specs/p3/contracts/error-codes.json`](specs/p3/contracts/error-codes.json) | P3 允许触碰的业务码白名单 |
+| [`specs/p4-tiering.md`](specs/p4-tiering.md) | P4 Agent 运行时的**分层判定**记录（S1 · Tier 2 · Spec） |
+| [`specs/p4/spec.md`](specs/p4/spec.md) | P4 Agent 运行时的契约（范围、红线、ReAct 管道、已定稿决策 D4~D7） |
+| [`specs/p4/tasks.md`](specs/p4/tasks.md) | P4 的任务清单（`T-001`~`T-005` ↔ `NEX-26`~`NEX-30` 一一对应） |
+| [`specs/p4/contracts/invariants.json`](specs/p4/contracts/invariants.json) | P4 的机器可读不变量（25 条，含 `planned` / `verified` 状态） |
+| [`specs/p4/contracts/error-codes.json`](specs/p4/contracts/error-codes.json) | P4 允许触碰的业务码白名单 |
 | [`rfcs/README.md`](rfcs/README.md) | **Tier 1 · RFC 层**产物的结构与 OQ 禁令 |
 
 ---
