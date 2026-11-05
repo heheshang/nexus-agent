@@ -206,13 +206,31 @@ fn the_breaker_uses_a_standard_mutex_not_a_tokio_mutex() {
 fn the_gateway_pipeline_order_matches_the_contract() {
     let gateway_source = std::fs::read_to_string(crate_root().join("src/gateway.rs")).unwrap();
 
-    let budget_at = gateway_source
-        .find("bound_chat_request")
-        .expect("网关应调用预算裁剪");
-    let breaker_at = gateway_source.find(".allow()").expect("网关应做熔断判断");
-    let provider_at = gateway_source
-        .find("self.provider.chat")
-        .expect("网关应调用供应商");
+    // ⚠️ 必须**剥离注释**再扫描 ——
+    // 模块级文档里就写着「预算裁剪 → 熔断 → 信号量 → 重试 → 供应商」，
+    // 不剥离的话第一个 `bound_chat_request` 命中的是**文档**，
+    // 位置比任何代码都早 —— 断言会变成「永远通过」的假象。
+    let code: String = gateway_source
+        .lines()
+        .map(|line| line.split_once("//").map_or(line, |(code, _)| code))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // 只看 `attempt` 函数体 —— 管道顺序在那里。
+    let attempt_at = code
+        .find("async fn attempt")
+        .expect("网关应有 attempt 方法");
+    let body = &code[attempt_at..];
+
+    let budget_at = body.find("bound_chat_request").expect("网关应调用预算裁剪");
+    let breaker_at = body.find(".allow()").expect("网关应做熔断判断");
+    // 找 `provider` 后跟 `chat` —— 而不是找 `self.provider.chat`。
+    // 插桩后 `self.provider.chat(...)` 会被 `cargo fmt` 拆成多行
+    // （`.provider` 与 `.chat(...)` 各占一行），固定字符串就找不到。
+    // 找**方法调用** `.chat(` —— 而不是 `.provider`。
+    // `.provider` 会命中 `desc.provider_code`（字段访问），那不是调用点。
+    // 用 `.chat(` 还顺带避开了 `cargo fmt` 的换行拆分。
+    let provider_at = body.find(".chat(").expect("网关应调用供应商的 chat 方法");
 
     assert!(
         budget_at < breaker_at,
@@ -286,6 +304,89 @@ fn the_tool_control_plane_fields_never_reach_the_upstream_request() {
             !code.contains(forbidden),
             "`{forbidden}` 是控制面字段，不得出现在上游请求的转换路径里 —— \
              它只给执行层看，绝不能发给模型"
+        );
+    }
+}
+
+/// 埋点**不得**把凭据写进 span 字段或日志。
+///
+/// # 为什么这是**结构层**断言
+///
+/// 凭据泄露是**不可撤回**的 —— 一旦进日志或 trace 后端，
+/// 它就散落到各处（缓存、索引、第三方）。
+///
+/// 行为层测试**验证不了**「某个字段将来不会被填成 api_key」——
+/// 那是一条**源码形状**的约束，只能扫源码。
+///
+/// # 为什么扫 `nexus-llm` 的**埋点调用点**
+///
+/// `api_key` 的持有者是 `ModelDescriptor`（`secrecy::SecretString`）。
+/// 只有在**埋点**的调用点把 `expose_api_key()` 的结果传给埋点时才会泄露。
+/// 所以断言「埋点附近不出现 `expose_api_key`」就够了。
+#[test]
+fn the_credential_never_reaches_the_instrumentation() {
+    let gateway_source = std::fs::read_to_string(crate_root().join("src/gateway.rs")).unwrap();
+
+    // 找出所有埋点调用点（`span.record` / `info_span!` / `tracing::`）。
+    let mut violations = Vec::new();
+    for (idx, line) in gateway_source.lines().enumerate() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("//") {
+            continue;
+        }
+        let is_instrumentation = trimmed.contains("span.record")
+            || trimmed.contains("info_span!")
+            || trimmed.contains("tracing::")
+            || trimmed.contains("in_scope");
+        if !is_instrumentation {
+            continue;
+        }
+        // 埋点行里不得出现凭据。
+        for forbidden in ["expose_api_key", "api_key", "secret"] {
+            if line.contains(forbidden) {
+                violations.push(format!(
+                    "{}:{} —— 埋点行里出现了 `{forbidden}`",
+                    "src/gateway.rs",
+                    idx + 1
+                ));
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "凭据不得进入埋点 —— span 字段会进日志、进 trace 后端，那是不可撤回的扩散：\n  {}",
+        violations.join("\n  ")
+    );
+}
+
+/// `nexus-observability` 的埋点 API **不接收**凭据类型的参数。
+///
+/// # 为什么这条是**类型层**约束
+///
+/// `nexus-observability` 的 `StreamSpan::new` 与 `record` 只接受 `&str`。
+/// `&str` **无法**区分「模型名」与「api_key」—— 所以这条断言
+/// 保证的是「**签名里没有凭据类型**」，而不是「运行时不会传错」。
+///
+/// 运行时那道防线由 `nexus-llm` 的
+/// `the_credential_never_reaches_the_instrumentation` 负责。
+#[test]
+fn the_observability_api_has_no_credential_typed_parameters() {
+    let obs_source =
+        std::fs::read_to_string(crate_root().join("../nexus-observability/src/lib.rs")).unwrap();
+
+    // 剥注释后扫。
+    let code: String = obs_source
+        .lines()
+        .map(|line| line.split_once("//").map_or(line, |(code, _)| code))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    for forbidden in ["SecretString", "SecretBox", "ExposeSecret"] {
+        assert!(
+            !code.contains(forbidden),
+            "`nexus-observability` 的 API 不应出现凭据类型 `{forbidden}` —— \
+             埋点设施不该知道什么是凭据"
         );
     }
 }

@@ -125,6 +125,11 @@ pub fn table() -> EnvMappingTable {
             "llm.deepseek.model",
             EnvValueType::String,
         ))
+        .with(EnvMapping::new(
+            "LLM__MAX_CONNS_PER_PROVIDER",
+            "llm.max_conns_per_provider",
+            EnvValueType::Int,
+        ))
         // ---- 沙箱 ----
         .with(EnvMapping::new(
             "SANDBOX__TIMEOUT_SECS",

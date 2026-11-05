@@ -63,6 +63,7 @@
 | [`operations/p1-plan.md`](operations/p1-plan.md) | P1 阶段（核心类型）的计划与红线 |
 | [`operations/p2-plan.md`](operations/p2-plan.md) | P2 阶段（基础设施）的计划与红线 |
 | [`operations/p3-plan.md`](operations/p3-plan.md) | P3 阶段（LLM 网关）的计划与红线 |
+| [`operations/p3-runbook.md`](operations/p3-runbook.md) | P3 阶段（LLM 网关）的运行说明 —— 供应商配置、凭据、熔断单副本粒度、可观测与回滚 |
 
 ---
 

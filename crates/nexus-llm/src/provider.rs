@@ -44,8 +44,45 @@ pub struct ProviderConfig {
 impl Default for ProviderConfig {
     fn default() -> Self {
         Self {
-            timeout: Duration::from_secs(120),
+            timeout: DEFAULT_TIMEOUT,
         }
+    }
+}
+
+/// 默认的单次请求超时。
+///
+/// 与 `nexus-config` 的 base 配置 `llm.request_timeout_secs: 120` 一致。
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(120);
+
+impl ProviderConfig {
+    /// 从配置栈构造。
+    ///
+    /// # 读哪些配置项
+    ///
+    /// | 配置路径 | 环境变量 | 缺省时 |
+    /// |---|---|---|
+    /// | `llm.request_timeout_secs` | `NX_LLM__REQUEST_TIMEOUT_SECS` | [`DEFAULT_TIMEOUT`] |
+    ///
+    /// # 为什么**读配置**而不是硬编码
+    ///
+    /// 映射表里**早就有** `NX_LLM__REQUEST_TIMEOUT_SECS` ——
+    /// 但如果不读它，运维设了环境变量**不生效**，
+    /// 而 `nexus config show` 会**显示**它已生效。
+    /// 那是**静默失效**。
+    ///
+    /// # 配置缺失时**不报错**
+    ///
+    /// 缺省值是**合理的安全值**（120 秒与 base 配置一致）。
+    /// 配置栈不完整不该让服务起不来 —— 那会让「忘了配一项」变成「服务不可用」。
+    /// 真的需要强制时，调用方可以自己检查 `ConfigStack::origin`。
+    pub fn from_config(stack: &nexus_config::ConfigStack) -> Self {
+        let timeout = stack
+            .get_u64("llm.request_timeout_secs")
+            .filter(|secs| *secs > 0)
+            .map(Duration::from_secs)
+            .unwrap_or(DEFAULT_TIMEOUT);
+
+        Self { timeout }
     }
 }
 

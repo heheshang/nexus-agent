@@ -28,7 +28,7 @@
 | **Redis** | 基础设施（缓存 / 租户状态） | `crates/nexus-infra/src/redis.rs` | `NX_REDIS__URL` | ✅ 已落地 |
 | **S3** | 基础设施（对象存储） | `crates/nexus-infra/src/s3.rs` | `NX_S3__ACCESS_KEY` / `NX_S3__SECRET_KEY` | ✅ 已落地 |
 | **Milvus** | 基础设施（向量库） | `crates/nexus-infra/src/milvus.rs` | `NX_MILVUS__URL` | ✅ 已落地 |
-| **模型供应商**（OpenAI 兼容） | 供应商（LLM 网关） | `crates/nexus-llm/`（客户端 + 网关） | `NX_LLM__DEEPSEEK__API_KEY` | 🚧 P3 进行中（NEX-19） |
+| **模型供应商**（OpenAI 兼容） | 供应商（LLM 网关） | `crates/nexus-llm/`（客户端 + 网关） | `NX_LLM__DEEPSEEK__API_KEY` | ✅ 已接入（NEX-16..20 + NEX-23；**只做 OpenAI 兼容协议**，ollama 走 `/v1` 兼容层 —— 决策 D2） |
 | **GitHub** | 源码控制（IssueTracker / SourceControl） | `git` CLI + `gh` CLI（**仓库外**） | git / gh 自身凭据 | ⏳ 未接入 |
 
 ### 契约类型与上游的对应

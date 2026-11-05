@@ -58,6 +58,42 @@
 //! 这个边界用**类型**表达（[`gateway::StreamOutcome`]）——
 //! 回退的唯一入口是 `FailedBeforeStart`，编译期就没法在流已建立后回退。
 //!
+//! # 可观测
+//!
+//! 网关的 span 分三层：
+//!
+//! | span | 覆盖范围 | 生命周期 |
+//! |---|---|---|
+//! | `llm.chat` | 一次业务调用（含 fallback） | 调用结束 |
+//! | `llm.attempt` | 一次供应商尝试 | 该次尝试结束（重试会产生多个） |
+//! | `llm.stream` | 一次流式调用 | **流关闭时** |
+//!
+//! ⚠️ `llm.stream` 的生命周期**绑定流**，不是绑定「拿到流」。
+//!
+//! 参考实现的 `spanOnClose` 注释原文：
+//! 「若放进 `runWithGuard`，拿到通道就返回，span 只有几毫秒，等于没测」。
+//!
+//! `nexus_observability::StreamSpan::wrap` **消耗** span（而不是克隆）——
+//! 因为 `tracing` 的 span 是**引用计数**的，
+//! 只有**最后一个**句柄被 drop 时才触发 `on_close`。
+//! 留一份克隆在别处，span 就**永远不会关闭**。
+//!
+//! 指标：`llm_requests_total`（标签 `provider` / `status`）与
+//! `llm_tokens_total`（标签 `provider` / `kind`）。
+//! `status` 的 `canceled` **单独计数** —— 取消不是供应商的故障。
+//!
+//! # 配置接线
+//!
+//! [`ProviderConfig::from_config`] 与 [`GatewayConfig::from_config`]
+//! 从 [`nexus_config::ConfigStack`] 读配置 ——
+//! 映射表里**早就有** `NX_LLM__REQUEST_TIMEOUT_SECS` 等条目，
+//! 但如果不读，运维设了环境变量**不生效**，
+//! 而 `nexus config show` 会**显示**它已生效。那是**静默失效**。
+//!
+//! 配置缺失时**回退到缺省值**而不是报错 ——
+//! 让「忘了配一项」变成「服务不可用」不合理。
+//! 但 **0 值必须回退**：0 超时会让每个请求立即失败。
+//!
 //! # 失败语义**不重写**
 //!
 //! 重试判据一律取 `nexus-core` 的 `RetryPolicy`（架构文档 §2.6.3）——

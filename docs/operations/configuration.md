@@ -91,6 +91,7 @@ NX_<段>__<段>__<键>    →    配置路径  段.段.键（全小写）
 | `NX_LLM__DEEPSEEK__BASE_URL` | `llm.deepseek.base_url` | string | |
 | `NX_LLM__DEEPSEEK__API_KEY` | `llm.deepseek.api_key` | string | ✅ |
 | `NX_LLM__DEEPSEEK__MODEL` | `llm.deepseek.model` | string | |
+| `NX_LLM__MAX_CONNS_PER_PROVIDER` | `llm.max_conns_per_provider` | int | |
 | `NX_SANDBOX__TIMEOUT_SECS` | `sandbox.timeout_secs` | int | |
 | `NX_SANDBOX__MAX_OUTPUT_BYTES` | `sandbox.max_output_bytes` | int | |
 | `NX_OBSERVABILITY__OTLP_ENABLED` | `observability.otlp_enabled` | bool | |

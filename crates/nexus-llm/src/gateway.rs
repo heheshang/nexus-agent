@@ -31,8 +31,10 @@
 //! 原因：客户端已经收到了一半内容，切换模型会产生内容拼接错乱。
 
 use std::sync::{Arc, Mutex};
+use tracing::Instrument;
 
 use nexus_core::error::AppError;
+use nexus_observability::{LlmMetrics, RequestStatus, StreamSpan};
 
 use crate::breaker::BreakerRegistry;
 use crate::budget::bound_chat_request;
@@ -60,6 +62,43 @@ impl Default for GatewayConfig {
         }
     }
 }
+
+impl GatewayConfig {
+    /// 从配置栈构造。
+    ///
+    /// # 读哪些配置项
+    ///
+    /// | 配置路径 | 环境变量 | 缺省时 |
+    /// |---|---|---|
+    /// | `llm.max_conns_per_provider` | `NX_LLM__MAX_CONNS_PER_PROVIDER` | 16（参考实现默认值） |
+    ///
+    /// # ⚠️ 与 `ProviderConfig::from_config` 的差别
+    ///
+    /// 超时与并发上限**语义不同**：
+    ///
+    /// - 超时缺省 120 秒 —— 缺了只是慢一点。
+    /// - 并发上限缺省 16 —— 缺了是**限流**，直接决定吞吐。
+    ///
+    /// 所以并发上限的缺省值**必须**与参考实现一致，
+    /// 且**不**允许配成 0（0 会让所有请求卡在 `acquire` 上）。
+    pub fn from_config(stack: &nexus_config::ConfigStack) -> Self {
+        let max_conns_per_provider = stack
+            .get_u64("llm.max_conns_per_provider")
+            .filter(|n| *n > 0)
+            .map(|n| n as usize)
+            .unwrap_or(DEFAULT_MAX_CONNS_PER_PROVIDER);
+
+        Self {
+            retry: RetryConfig::default(),
+            max_conns_per_provider,
+        }
+    }
+}
+
+/// 默认的每供应商并发上限。
+///
+/// 与参考实现一致（`internal/llm/ratelimiter.go:16`）。
+const DEFAULT_MAX_CONNS_PER_PROVIDER: usize = 16;
 
 /// 一次调用的**目标** —— primary 与可选的 fallback。
 #[derive(Debug, Clone)]
@@ -94,6 +133,7 @@ pub struct Gateway {
     provider: OpenAiProvider,
     breakers: Arc<BreakerRegistry>,
     config: GatewayConfig,
+    metrics: Arc<LlmMetrics>,
 }
 
 impl Gateway {
@@ -103,12 +143,18 @@ impl Gateway {
             provider,
             breakers: Arc::new(BreakerRegistry::new()),
             config,
+            metrics: Arc::new(LlmMetrics::new()),
         }
     }
 
     /// 用默认配置创建网关。
     pub fn with_defaults(provider: OpenAiProvider) -> Self {
         Self::new(provider, GatewayConfig::default())
+    }
+
+    /// 指标集。
+    pub fn metrics(&self) -> &Arc<LlmMetrics> {
+        &self.metrics
     }
 
     /// 熔断器注册表。
@@ -142,31 +188,60 @@ impl Gateway {
         req: &ChatRequest,
         cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<ChatResponse, LlmError> {
-        let primary_result = self.attempt(&target.primary, req, cancel).await;
+        let span = tracing::info_span!(
+            target: "nexus::llm",
+            "llm.chat",
+            llm.provider = %target.primary.provider_code,
+            llm.has_fallback = target.fallback.is_some(),
+        );
 
-        match primary_result {
-            Ok(response) => Ok(response),
-            Err(primary_err) => {
-                // 没有 fallback —— 直接返回。
-                let Some(fallback_desc) =
-                    usable_fallback(&target.primary, target.fallback.as_ref())
-                else {
-                    return Err(primary_err);
-                };
+        let result = async {
+            let primary_result = self.attempt(&target.primary, req, cancel).await;
 
-                let fallback_result = self.attempt(&fallback_desc, req, cancel).await;
+            match primary_result {
+                Ok(response) => Ok(response),
+                Err(primary_err) => {
+                    // 没有 fallback —— 直接返回。
+                    let Some(fallback_desc) =
+                        usable_fallback(&target.primary, target.fallback.as_ref())
+                    else {
+                        return Err(primary_err);
+                    };
 
-                match fallback_result {
-                    Ok(response) => Ok(response),
-                    Err(fallback_err) => Err(combine_errors(
-                        &target.primary,
-                        &primary_err,
-                        &fallback_desc,
-                        &fallback_err,
-                    )),
+                    let fallback_result = self.attempt(&fallback_desc, req, cancel).await;
+
+                    match fallback_result {
+                        Ok(response) => Ok(response),
+                        Err(fallback_err) => Err(combine_errors(
+                            &target.primary,
+                            &primary_err,
+                            &fallback_desc,
+                            &fallback_err,
+                        )),
+                    }
                 }
             }
         }
+        .instrument(span.clone())
+        .await;
+
+        // 指标在 span **之外**记录 ——
+        // 指标是「这次调用结束了」的断言，与 span 的生命周期无关。
+        let status = match &result {
+            Ok(_) => RequestStatus::Ok,
+            Err(LlmError::Canceled) => RequestStatus::Canceled,
+            Err(_) => RequestStatus::Error,
+        };
+        self.metrics
+            .record_request(&target.primary.provider_code, status);
+
+        if let Ok(response) = &result {
+            span.record("llm.finish_reason", &response.finish_reason);
+            span.record("llm.prompt_tokens", response.usage.prompt_tokens);
+            span.record("llm.completion_tokens", response.usage.completion_tokens);
+        }
+
+        result
     }
 
     /// 对**单个供应商**做一次完整尝试（含重试）。
@@ -202,6 +277,15 @@ impl Gateway {
         let semaphore = tokio::sync::Semaphore::new(self.config.max_conns_per_provider.max(1));
         let permit = semaphore.acquire().await.map_err(|_| LlmError::Canceled)?;
 
+        // 每次尝试一个 span —— 重试会产生多个 span，
+        // 它们挂在 `llm.chat` 之下（span 层级）。
+        let attempt_span = tracing::info_span!(
+            target: "nexus::llm",
+            "llm.attempt",
+            llm.provider = %desc.provider_code,
+            llm.model = %desc.model_name,
+        );
+
         // ── 4. 重试（内含供应商调用）──
         //
         // `retry_do` 的错误类型是 `AppError`（重试判据取自
@@ -211,12 +295,17 @@ impl Gateway {
 
         let outcome = retry_do(&self.config.retry, cancel, || {
             let last_error = last_error.clone();
+            let attempt_span = attempt_span.clone();
             async move {
                 // 预算在**每次尝试**都重跑。
                 let bounded = bound_chat_request(desc, req).map_err(app_to_llm)?;
                 let max_tokens = bounded.max_tokens;
 
-                let result = self.provider.chat(desc, req, max_tokens).await;
+                let result = self
+                    .provider
+                    .chat(desc, req, max_tokens)
+                    .instrument(attempt_span.clone())
+                    .await;
 
                 match result {
                     Ok(response) => Ok(response),
@@ -404,12 +493,52 @@ impl Gateway {
             .chat_stream(desc, req, bounded.max_tokens)
             .await
         {
-            Ok(stream) => StreamOutcome::Stream(StreamHandle {
-                stream,
-                provider_code: desc.provider_code.clone(),
-            }),
+            Ok(stream) => {
+                // ⚠️ span 绑的是**流**，不是「拿到流」这个时刻。
+                //
+                // 参考实现的 `spanOnClose` 注释原文：
+                // 「若放进 runWithGuard，拿到通道就返回，span 只有几毫秒，等于没测」。
+                //
+                // 所以 span 被**移进**流的包装里 ——
+                // 它随流被消费完（或被 drop）才结束，
+                // 从而覆盖「模型生成 + 客户端消费」的**全部**耗时。
+                let span = StreamSpan::new("llm.chat_stream", &desc.provider_code);
+                // `wrap` **消耗** span —— wrapper 持有**唯一**的句柄，
+                // 所以 span 随**流**结束（而不是随「拿到流」结束）。
+                //
+                // `wrap_with` 的回调在**事件流经时**记录字段 ——
+                // 因为 span 在流结束时才关闭，
+                // 事后再记字段就看不到了。
+                let stream = futures::StreamExt::boxed(span.wrap_with(stream, |span, item| {
+                    if let Ok(event) = item {
+                        if !event.finish_reason.is_empty() {
+                            span.record("llm.finish_reason", event.finish_reason.as_str());
+                        }
+                        if let Some(usage) = &event.usage {
+                            span.record("llm.prompt_tokens", usage.prompt_tokens);
+                            span.record("llm.completion_tokens", usage.completion_tokens);
+                        }
+                    }
+                }));
+
+                // 建流成功 —— 记 `ok`。
+                //
+                // ⚠️ 建流成功后**流中途**的失败**不再计数** ——
+                // 那属于「流已建立后」的错误，由下游处理。
+                // 原因：中途失败的 span 归属与重试语义不同，
+                // 在这里补记会与 `llm.chat` 的计数**重复**。
+                self.metrics
+                    .record_request(&desc.provider_code, RequestStatus::Ok);
+
+                StreamOutcome::Stream(StreamHandle {
+                    stream,
+                    provider_code: desc.provider_code.clone(),
+                })
+            }
             Err(err) => {
                 record_outcome(&breaker, CallOutcome::Failure);
+                self.metrics
+                    .record_request(&desc.provider_code, RequestStatus::Error);
                 StreamOutcome::FailedBeforeStart(err)
             }
         }

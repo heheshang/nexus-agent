@@ -39,6 +39,8 @@ llm:
   request_timeout_secs: 120
   # 上下文预算（token）
   context_budget: 32000
+  # 每供应商并发上限。0 会被回退到 16（0 会让所有请求卡在 acquire 上）。
+  max_conns_per_provider: 16
 
 sandbox:
   # 危险工具执行超时（秒）

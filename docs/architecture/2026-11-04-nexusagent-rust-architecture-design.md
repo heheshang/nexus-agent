@@ -1782,6 +1782,9 @@ Rust 的测试可以验证「某段代码**不能**编译」：
 | 网关的**装配顺序**与契约一致 | 参考架构 §2.4 | ✅ 已落地（NEX-19 的 `the_gateway_pipeline_order_matches_the_contract`） |
 | 流式回退的**首事件边界**由类型表达 | §3.3 | ✅ 已落地（NEX-19 的 `the_stream_outcome_separates_before_start_from_after_start`） |
 | `ToolDef` 的**控制面字段**不进入上游请求体 | NEX-16 备注 | ✅ 已落地（NEX-19 的 `the_tool_control_plane_fields_never_reach_the_upstream_request`，剥注释后扫源码） |
+| 网关的 span 生命周期**绑定流**（不是绑定「拿到流」） | §2.4 关键不变量 2 | ✅ 已落地（NEX-23 的 `the_gateway_span_closes_when_the_stream_is_consumed`，**网关层**断言 —— `nexus-observability` 的单元测试验证不了「网关是否多留了一份克隆」） |
+| 埋点**不得**把凭据写进 span 字段或日志 | §2.7 凭据纪律 | ✅ 已落地（NEX-23 的 `the_credential_never_reaches_the_instrumentation`，扫埋点调用点） |
+| `nexus-observability` 的 API **不接收**凭据类型 | §2.7 凭据纪律 | ✅ 已落地（NEX-23 的 `the_observability_api_has_no_credential_typed_parameters`） |
 
 > **落地记录（2026-11-04，P1 完成）**：本表的后两项属于 **P2** ——
 > `workflow_runs` 的写入者与 `nexus-repo` 的依赖面都要等 P2 的
@@ -1848,6 +1851,10 @@ Rust 的测试可以验证「某段代码**不能**编译」：
 | 熔断**预热期**不评估错误率 | 熔断器测试 | ✅ 已验证（`nexus-llm` 的 `the_warmup_period_does_not_evaluate_the_error_rate`） |
 | 取消**不计入**熔断样本 | 熔断器测试 | ✅ 已验证（`nexus-llm` 的 `cancellation_does_not_count_towards_the_breaker`） |
 | 熔断拒绝**不计入**熔断样本 | 熔断器测试 | ✅ 已验证（`nexus-llm` 的 `a_rejected_call_does_not_count_towards_the_breaker`） |
+| 流式 span 在**流关闭时**才结束 | 网关测试（订阅 `on_close` 回调） | ✅ 已验证（NEX-23 的 `the_gateway_span_closes_when_the_stream_is_consumed` + `nexus-observability` 的 `the_span_closes_when_the_stream_closes_not_before`） |
+| 取消**单独计数**，不与错误混同 | 指标测试 | ✅ 已验证（NEX-23 的 `cancellation_is_counted_separately_from_error`） |
+| 网关的超时/并发上限**走配置路径** | 配置测试 | ✅ 已验证（NEX-23 的 `config_wiring.rs` 6 个用例） |
+| 标签不匹配**不 panic** | 指标测试 | ✅ 已验证（NEX-23 的 `a_mismatched_label_does_not_panic`） |
 
 > **落地记录（2026-11-05，P3 完成）**：上表的 P3 各行由 `nexus-llm` 承担，
 > 契约载体是 `docs/specs/p3/contracts/invariants.json`（19 条不变量，
