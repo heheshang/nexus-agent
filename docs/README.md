@@ -20,6 +20,7 @@
 | 文档 | 一句话作用 |
 |---|---|
 | [`architecture/2026-11-04-nexusagent-rust-architecture-design.md`](architecture/2026-11-04-nexusagent-rust-architecture-design.md) | **唯一权威** —— 架构与契约的定稿条款（错误码、事件、ID 类型、crate 边界、验证分层） |
+| [`architecture/2026-11-06-nexusagent-improvement-plan.md`](architecture/2026-11-06-nexusagent-improvement-plan.md) | **改进建议与实施计划**（2026-11-06 评估）—— 11 条已复现缺陷 + 4 条待决策 + 分波次计划 |
 | [`architecture/2026-11-04-nexusagent-eino-rust-reference-architecture.md`](architecture/2026-11-04-nexusagent-eino-rust-reference-architecture.md) | 参考实现（Go/Eino）到 Rust 的**迁移对照** —— 差异与理由 |
 | [`architecture/2026-11-03-nexusagent-eino-reference-architecture.md`](architecture/2026-11-03-nexusagent-eino-reference-architecture.md) | 面向 `nexus-lab` 重建的参考架构说明（**历史文档**，定位已变更） |
 
@@ -54,6 +55,11 @@
 | [`specs/p5/tasks.md`](specs/p5/tasks.md) | P5 的任务清单（`T-001`~`T-006` ↔ `NEX-31`~`NEX-36` 一一对应） |
 | [`specs/p5/contracts/invariants.json`](specs/p5/contracts/invariants.json) | P5 的机器可读不变量（**37 条**，全部 `verified`） |
 | [`specs/p5/contracts/error-codes.json`](specs/p5/contracts/error-codes.json) | P5 允许触碰的业务码白名单 |
+| [`specs/p6-tiering.md`](specs/p6-tiering.md) | P6 工作流层的**分层判定**记录（S1 · Tier 2 · Spec） |
+| [`specs/p6/spec.md`](specs/p6/spec.md) | P6 工作流层的契约（范围、红线、图引擎与持久执行、已定稿决策 D12~D18） |
+| [`specs/p6/tasks.md`](specs/p6/tasks.md) | P6 的任务清单（`T-001`~`T-010` ↔ `NEX-37`~`NEX-46` 一一对应） |
+| [`specs/p6/contracts/invariants.json`](specs/p6/contracts/invariants.json) | P6 的机器可读不变量（**51 条**，`planned` —— 证据待 T-001~T-010 产生） |
+| [`specs/p6/contracts/error-codes.json`](specs/p6/contracts/error-codes.json) | P6 允许触碰的业务码白名单 |
 | [`rfcs/README.md`](rfcs/README.md) | **Tier 1 · RFC 层**产物的结构与 OQ 禁令 |
 
 ---
