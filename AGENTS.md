@@ -123,3 +123,20 @@ feat(core): 增加取消语义类型状态 (NEX-101)
 | `backlog/README.md` | 任务文件格式与生命周期 |
 | `scripts/check-rules.sh` | 规则文件一致性校验 |
 | `scripts/check-docs.sh` | 文档层一致性校验 |
+
+## Learned User Preferences
+
+- 只读评审 / 审计类任务不得修改任何文件、不得提交；需要变异验证时在独立 `git worktree` 中操作，主仓库工作区保持干净。
+- 明确要求「只读」或「暂不实现」时，严格停在该边界：只产出分析与文档，不写实现代码，不 commit / push / 开 PR。
+- 偏好先产出设计文档与方案、确认后再进入实现阶段。
+- 评审类任务要求结论带可复核证据（精确到测试函数名、文件路径、命令输出），不接受笼统判断。
+- 常用极简指令（「继续」「执行」）推进，视为按既定方向继续，不反复反问。
+- 临时脚本 / 一次性工具不放进生产 crate 的 `src/`，避免被门禁与架构文档视为产品的一部分。
+
+## Learned Workspace Facts
+
+- 只读评审采用并行分片 worker（按主题切片：middleware + router、response + error、文档层一致性、整体判据核对），同一 brief 失败时会重试派发。
+- 源码扫描类门禁统一走 `cargo run -q --locked -p nexus-core --example token_scan -- <子命令>`（token 级 AST 扫描），不用 `sed` 剥注释；解析失败必须让门禁红。
+- P6 工作流层决策 D12 = 选项 B：`nexus-execution` 新增依赖 `nexus-repo`（持久化能力留在 `nexus-repo`），`nexus-repo → nexus-execution` 仍禁止；已同步架构文档 §4.2 / §4.3 / §4.4 与 `scripts/check-deps.sh` 的 `deps_of`。
+- Spec 层产物落 `docs/specs/<slug>/`（`spec.md`、`tasks.md`、`contracts/invariants.json`、`contracts/error-codes.json`）加 `docs/specs/<slug>-tiering.md`；`T-NNN` 与 `backlog/` 的 `NEX-nn` 由 `scripts/check-specs.sh` 双向校验。
+- 「写入权唯一」这类控制不能用「类型名出现在哪些 crate」的结构层断言表达；依赖方向变更后判定手段要改为按写操作归属。
