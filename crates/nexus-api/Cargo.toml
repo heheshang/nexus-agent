@@ -8,14 +8,10 @@ publish.workspace = true
 
 [dependencies]
 nexus-core.workspace = true
-nexus-config.workspace = true
-nexus-model.workspace = true
 nexus-observability.workspace = true
-nexus-security.workspace = true
 nexus-service.workspace = true
 nexus-agent.workspace = true
 nexus-execution.workspace = true
-nexus-llm.workspace = true
 
 axum.workspace = true
 tower.workspace = true

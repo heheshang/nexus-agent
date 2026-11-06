@@ -132,20 +132,29 @@ fn the_api_crate_adds_no_internal_dependencies() {
     //
     // 本断言拦的是**另一件事**：在**不**改声明表的前提下偷偷加依赖 ——
     // 那样规则 7 会红，但红的原因（表不一致）**掩盖**了真正的问题（依赖方向变了）。
-    let manifest = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
-        .expect("读取 Cargo.toml 失败");
-
+    //
+    // ⚠️ **每一条允许的依赖都必须标注条款依据** ——
+    // 架构文档 §4.1 的 crate 图是**目标态**，
+    // 「允许」不等于「需要」。
+    // 没有条款依据的依赖不得放行（那等于 allowlist 变成了「什么都行」）。
+    //
+    // | 依赖 | 条款依据 |
+    // |---|---|
+    // | `nexus-core` | §4.4 规则 2（`nexus-core` 是依赖图的根） |
+    // | `nexus-observability` | §4.1（协议 → 指标） |
+    // | `nexus-agent` | §4.1.1 的 2026-11-05 修正（协议层可借只读类型） |
+    // | `nexus-service` | §4.1 crate 图 `API --> SVC`（业务编排归属） |
+    // | `nexus-execution` | §4.1.1 的 2026-11-05 修正（协议层可借只读类型） |
     let allowed = [
         "nexus-core",
-        "nexus-config",
-        "nexus-model",
         "nexus-observability",
-        "nexus-security",
         "nexus-service",
         "nexus-agent",
         "nexus-execution",
-        "nexus-llm",
     ];
+
+    let manifest = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
+        .expect("读取 Cargo.toml 失败");
 
     for line in manifest.lines() {
         let line = line.trim();
@@ -162,6 +171,82 @@ fn the_api_crate_adds_no_internal_dependencies() {
             "P5 不新增内部 crate 依赖，发现未授权的依赖：{name}"
         );
     }
+}
+
+#[test]
+fn the_api_crate_declares_no_zero_reference_internal_dependencies() {
+    // ⚠️ **零引用的依赖**是**依赖噪音** —— 它让 crate 图失真，
+    // 而架构测试 `the_api_crate_does_not_use_the_service_crate`
+    // 只扫 `src/` 的标识符，**不查 manifest**。
+    //
+    // 依赖已在、闸门只是没检查 —— 真正的违规要等到有人**写了**引用才会红。
+    // 那时已经晚了一步。
+    //
+    // ⚠️ **例外**：`nexus-service` / `nexus-execution` 是
+    // §4.1 crate 图**预留**的接缝（P6 接线用），当前 `src/` 里零引用是**预期**的。
+    // 那两条在 §4.1 / §4.1.1 有**条款依据**，所以豁免。
+    const ZERO_REFERENCE_EXEMPT: &[&str] = &[
+        // §4.1 crate 图 `API --> SVC` —— 业务编排归属 P6 接线。
+        "nexus-service",
+        // §4.1.1 的 2026-11-05 修正 —— 协议层可借执行层的只读类型。
+        "nexus-execution",
+    ];
+
+    let manifest = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
+        .expect("读取 Cargo.toml 失败");
+
+    let mut declared = Vec::new();
+    for line in manifest.lines() {
+        let line = line.trim();
+        let Some((name, _)) = line.split_once(".workspace") else {
+            continue;
+        };
+        let name = name.trim();
+        if name.starts_with("nexus-") {
+            declared.push(name.to_string());
+        }
+    }
+
+    // 扫 `src/` 里真正被引用的内部 crate。
+    let mut referenced: Vec<String> = Vec::new();
+    for path in source_files() {
+        let raw = fs::read_to_string(&path).expect("读取源码失败");
+        let scanned = token_scan::scan_code(&raw).unwrap_or_else(|e| {
+            panic!(
+                "解析 {} 失败：{e} —— 解析失败会让扫描结果**不完整**，\
+                 那正是「静默失效」的形态",
+                path.display()
+            )
+        });
+        for crate_name in &declared {
+            // Rust 里 crate 名用下划线：`nexus-core` → `nexus_core`。
+            let ident = crate_name.replace('-', "_");
+            if scanned
+                .paths
+                .iter()
+                .any(|p| p == &ident || p.starts_with(&format!("{ident}::")))
+            {
+                referenced.push(crate_name.clone());
+            }
+        }
+    }
+
+    let mut violations = Vec::new();
+    for name in &declared {
+        if referenced.contains(name) {
+            continue;
+        }
+        if ZERO_REFERENCE_EXEMPT.contains(&name.as_str()) {
+            continue;
+        }
+        violations.push(name.clone());
+    }
+
+    assert!(
+        violations.is_empty(),
+        "nexus-api 不得声明**零引用**的内部依赖（它们让 crate 图失真）：{violations:?}\n\
+         ⚠️ 若该依赖是架构文档预留的接缝，请加进 ZERO_REFERENCE_EXEMPT 并注明条款依据。"
+    );
 }
 
 #[test]

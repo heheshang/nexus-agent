@@ -39,7 +39,10 @@ deps_of() {
         nexus-mcp)           echo "nexus-core nexus-config nexus-model nexus-security nexus-observability" ;;
         nexus-a2a)           echo "nexus-core nexus-config nexus-model nexus-security nexus-observability nexus-mcp" ;;
         nexus-service)       echo "nexus-core nexus-config nexus-model nexus-observability nexus-infra nexus-security nexus-llm nexus-tool nexus-rag nexus-memory nexus-capacity nexus-workflow nexus-execution nexus-repo nexus-agent nexus-ingestion nexus-mcp nexus-a2a" ;;
-        nexus-api)           echo "nexus-core nexus-config nexus-model nexus-observability nexus-security nexus-service nexus-agent nexus-execution nexus-llm" ;;
+        # ⚠️ `nexus-service` / `nexus-execution` 两条边是**架构文档 §4.1
+        # crate 图预留**的（`API --> SVC`），当前 `src/` 里零引用 ——
+        # 它们是 P6 接线的接缝，**不删**（见 NEX-50 的决策记录）。
+        nexus-api)           echo "nexus-core nexus-observability nexus-service nexus-agent nexus-execution" ;;
         nexus-cli)           echo "nexus-core nexus-config nexus-observability nexus-service nexus-api" ;;
         *)                   echo "" ;;
     esac
