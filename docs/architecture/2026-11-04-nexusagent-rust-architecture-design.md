@@ -1467,7 +1467,18 @@ Rust 版把「约定」换成**可执行的结构层判定**：
 >
 > 因此判定手段从「**名字**只允许出现在某处」改为「**写操作**只允许发生在某处」。
 > 强度**不降**：前者可被「把类型下沉到 `nexus-repo`」绕过，
-> 后者管住**任何 crate 的任何写操作**，与 `nexus-repo` 是否持有该类型无关。
+> 后者管住**写操作归属**，与 `nexus-repo` 是否持有该类型无关。
+>
+> ⚠️ **识别覆盖的 SQL 形态有边界**（2026-11-06 NEX-37 预审实测）：
+> `extract_sql_writes` 是**词法级**识别，当前覆盖 `INSERT` / `UPDATE` / `DELETE` 的
+> **基本形态**（含大小写、空白、换行、引号标识符、`CTE`、`ON CONFLICT`）。
+> **不覆盖**：schema 限定（`INSERT INTO public.workflow_runs`）、
+> SQL 注释插入（`INSERT /* c */ INTO workflow_runs`）、
+> `REPLACE INTO` / `MERGE INTO` / `COPY ... FROM` / `TRUNCATE TABLE`。
+>
+> ⚠️ 这些形态**当前会漏判**（实测可绕过断言），修复登记为 **NEX-52**。
+> **当前代码无实际违规** —— `nexus-repo` 对这两张表的引用**全部**在文档注释里。
+> 但「管住任何 crate 的任何写操作」这句**只在已覆盖的形态上成立**。
 >
 > 依赖方向本身**仍然单向**：`nexus-repo → nexus-execution` **禁止**（§4.4）。
 >
@@ -1686,7 +1697,13 @@ pub struct ChatService {
 > `nexus-infra` 允许的是**建表 DDL**（迁移），不是访问。
 >
 > 强度**不降**：前者可被「把类型下沉到 `nexus-repo`」绕过，
-> 后者管住**任何 crate 的任何写操作**。
+> 后者管住**写操作归属**。
+>
+> ⚠️ **识别边界**：`extract_sql_writes` 是**词法级**识别，只覆盖
+> `INSERT` / `UPDATE` / `DELETE` 的**基本形态**；
+> **不覆盖** schema 限定（`INSERT INTO public.workflow_runs`）、
+> SQL 注释插入、`REPLACE INTO` / `MERGE INTO` / `COPY` / `TRUNCATE` ——
+> 这些形态**当前会漏判**，修复登记为 **NEX-52**。
 > 约束 1、3、4 **不受影响**，仍然成立。
 >
 > 这四条正是 §4.4 硬约束的具体化，由 `scripts/check-deps.sh` 强制。
@@ -1865,7 +1882,7 @@ Rust 的测试可以验证「某段代码**不能**编译」：
 
 | 测试 | 检验的设计条款 | 状态 |
 |---|---|---|
-| `workflow_runs` 的**写操作**只在 `nexus-execution` | §4.2 差异 1 | ✅ **已落地**（2026-11-06，决策 D12 · 选项 B，NEX-37 / T-001）—— 判定手段已从「**类型**归属」改为「**写操作**归属」：`nexus-core` 的 `workflow_runs_appears_only_in_execution_owned_crates`（全 workspace 扫描 `INSERT` / `UPDATE` / `DELETE`，写操作只允许出现在 `nexus-execution`；`nexus-infra` 允许**建表 DDL**，不是访问）；另有 `nexus-repo` 的负向断言 `nexus_repo_must_not_write_execution_owned_tables` 与 `nexus-core` 的 `nexus_repo_does_not_touch_workflow_runs`。**强度不降** —— 类型归属可被「把类型下沉到 `nexus-repo`」绕过，写操作归属管住**任何 crate 的任何写操作** |
+| `workflow_runs` 的**写操作**只在 `nexus-execution` | §4.2 差异 1 | ✅ **已落地**（2026-11-06，决策 D12 · 选项 B，NEX-37 / T-001）—— 判定手段已从「**类型**归属」改为「**写操作**归属」：`nexus-core` 的 `workflow_runs_appears_only_in_execution_owned_crates`（全 workspace 扫描 `INSERT` / `UPDATE` / `DELETE`，写操作只允许出现在 `nexus-execution`；`nexus-infra` 允许**建表 DDL**，不是访问）；另有 `nexus-repo` 的负向断言 `nexus_repo_must_not_write_execution_owned_tables` 与 `nexus-core` 的 `nexus_repo_does_not_touch_workflow_runs`。**强度不降** —— 类型归属可被「把类型下沉到 `nexus-repo`」绕过，写操作归属管住**写操作**（⚠️ 识别覆盖的 SQL 形态有边界，见 §4.2 差异 1 与 **NEX-52**） |
 | `nexus-model` 不含 `FromRow` / `sqlx::Type` | §4.2 差异 2 | ✅ 已有 |
 | `nexus-core` 零内部依赖 | §4.4 规则 2 | ✅ 已有 |
 | 能力层不依赖 `nexus-repo` | §4.1.2（防环） | ✅ 已有 |
@@ -1932,7 +1949,11 @@ Rust 的测试可以验证「某段代码**不能**编译」：
 > 判定手段改为「**写操作**归属」：全 workspace 扫描
 > `workflow_runs` / `workflow_step_runs` 的 `INSERT` / `UPDATE` / `DELETE`，
 > 写操作**只允许**出现在 `nexus-execution`；`nexus-infra` 允许**建表 DDL**（迁移），不是访问。
-> 强度**不降** —— 前者可被「把类型下沉到 `nexus-repo`」绕过，后者管住**任何 crate 的任何写操作**。
+> 强度**不降** —— 前者可被「把类型下沉到 `nexus-repo`」绕过，后者管住**写操作归属**。
+> ⚠️ **识别边界**：`extract_sql_writes` 是**词法级**识别，只覆盖
+> `INSERT` / `UPDATE` / `DELETE` 的**基本形态**；
+> **不覆盖** schema 限定、SQL 注释插入、`REPLACE` / `MERGE` / `COPY` / `TRUNCATE` ——
+> 修复登记为 **NEX-52**。
 >
 > **落地记录（2026-11-06，NEX-37 / T-001 完成）**：
 >
@@ -1957,6 +1978,26 @@ Rust 的测试可以验证「某段代码**不能**编译」：
 > ⚠️ **为什么 `CREATE TABLE` 不算写操作**：
 > `nexus-infra` 持有**迁移文件** —— `workflow_runs` 的表结构必须在迁移里定义。
 > 建表是**结构**定义，不是**数据**写入（§4.3.2 约束 2 明确允许）。
+>
+> ⚠️ **已知识别边界（NEX-37 预审实测，2026-11-06）**：
+> `extract_sql_writes` 是**词法级**识别，**当前不覆盖**以下能造成写入的形态 ——
+> 它们**会漏判**（实测可绕过断言）：
+>
+> | 漏判形态 | 提取到的「表名」 |
+> |---|---|
+> | `INSERT INTO public.workflow_runs ...`（schema 限定） | `public` |
+> | `INSERT /* c */ INTO workflow_runs ...`（块注释） | `c` |
+> | `INSERT -- c\n INTO workflow_runs ...`（行注释） | `c` |
+> | `UPDATE ONLY workflow_runs ...` | `ONLY` |
+> | `INSERT OR REPLACE INTO workflow_runs ...` | `OR` |
+> | `REPLACE INTO workflow_runs ...` | 无 |
+> | `MERGE INTO workflow_runs ... THEN UPDATE SET ...` | `SET` |
+> | `COPY workflow_runs ... FROM STDIN` | 无 |
+> | `TRUNCATE TABLE workflow_runs` | 无 |
+>
+> 根因：`sql_words()` **不剥离 SQL 注释**，注释里的词被当成表名。
+> 修复登记为 **NEX-52**（含对抗输入测试与故障注入）。
+> **当前代码无实际违规** —— `nexus-repo` 对这两张表的引用**全部**在文档注释里。
 >
 > ② §4.4 新增**规则 4**：`nexus-execution → nexus-repo` 允许，`nexus-repo → nexus-execution` 禁止。
 > **落地记录**：由 `nexus-core` 的 `nexus_repo_does_not_depend_on_the_execution_layer`、

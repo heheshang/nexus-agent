@@ -62,7 +62,15 @@ references:
 `nexus-infra` 允许的是**建表 DDL**（迁移），不是访问。
 
 **强度不降**：类型归属可被「把类型下沉到 `nexus-repo`」绕过；
-写操作归属管住**任何 crate 的任何写操作**。
+写操作归属管住**写操作**，与 `nexus-repo` 是否持有该类型无关。
+
+> ⚠️ **已知识别边界（NEX-37 预审实测，2026-11-06）**：
+> `extract_sql_writes` 是**词法级**识别，**不覆盖** schema 限定
+> （`INSERT INTO public.workflow_runs`）、SQL 注释插入、
+> `REPLACE INTO` / `MERGE INTO` / `COPY` / `TRUNCATE` ——
+> 这些形态**会漏判**（实测可绕过断言）。修复登记为 **NEX-52**。
+> **当前代码无实际违规** —— `nexus-repo` 对这两张表的引用**全部**在文档注释里。
+> 故「管住**任何 crate 的任何写操作**」这句**只在已覆盖的形态上成立**。
 
 ## 范围边界
 
@@ -108,6 +116,10 @@ references:
 - [x] #15 `Fence::CONDITIONS_TEMPLATE` 的**文本逐字节不变** —— 围栏条件的六个子句与绑定顺序**不改**
 - [x] #16 `cargo fmt --all --check` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo test --workspace --locked` 通过
 - [ ] #17 本任务已通过**人工评审**，且 AI 产出的改动有**额外一名评审**的签字（`ai-sdlc-quality-gates.mdc` 的契约级变更要求）
+  - **AI 预审已完成（2026-11-06）**：结论 `changes-requested`（1 条 major + 1 条 minor），
+    经操作者裁决按**登记后续任务**处置（NEX-52），**不阻塞合并**。
+    预审记录见文末「AI 预审记录」。
+  - ⏳ **待人工评审签字** —— AC #17 仍**未勾选**：AI 预审**不能**替代人工签字。
 
 ## DoR 判定
 
@@ -208,7 +220,7 @@ OQ-1 已由**操作者裁决**（选项 B），不是待定标记。
 - **决策**：「写入权唯一」的判定手段从「**类型**归属」改为「**写操作**归属」。
 - **依据**：选项 B 下 `nexus-repo` 的类型对所有依赖它的 crate 可见，
   「`nexus-repo` 不持有该类型」**推不出**「别的 crate 写不了」。
-  「写操作归属」管住**任何 crate 的任何写操作**，**强度不降**。
+  「写操作归属」管住**写操作**，**强度不降**。
 - **可逆性**：中 —— 判定手段可回退，但会重新留出「类型下沉」这条绕过路径。
 - **影响面**：`crates/nexus-core/tests/architecture.rs`、
   架构文档 §4.2 差异 1 / §4.3.2 约束 2。
@@ -250,7 +262,7 @@ OQ-1 已由**操作者裁决**（选项 B），不是待定标记。
 | #1 | `crates/nexus-execution/Cargo.toml` 含 `nexus-repo.workspace = true`；`scripts/check-deps.sh` 的 `deps_of nexus-execution` 含 `nexus-repo`；`bash scripts/check-deps.sh` 输出「规则 7：deps_of 与各 crate 的 Cargo.toml 必须一致 ✓」 |
 | #2 | `crates/nexus-repo/src/{lease,leases,outbox,outbox_repo}.rs` **四个文件仍在原路径**；`git diff --stat crates/nexus-repo/src/` 对这四个文件**无输出**（除 `lease.rs` 的临时变异，已还原） |
 | #3 ~ #7 | 架构文档 §4.2 差异 1 / §4.3 目标态表 / §4.3.2 约束 2 / §4.4 规则 4 / §5.3 / §6.3 **六处一致**；§5.3 表格的 `workflow_runs` 行与 §4.3 目标态表均标 ✅ **已落地**；§6.3 的「crate 边界与 trait 归属」条目补记「NEX-37 / T-001 已落地」 |
-| #8 | `workflow_runs_appears_only_in_execution_owned_crates` 现在的判据是 `scanned.writes_table(table)`（**写**过），允许集为**全 workspace** 的「除 `nexus-execution` 外**任何** crate」；判据**不是**「只看某个 crate」 |
+| #8 | `workflow_runs_appears_only_in_execution_owned_crates` 现在的判据是 `scanned.writes_table(table)`（**写**过），允许集为**全 workspace** 的「除 `nexus-execution` 外**任何** crate」；判据**不是**「只看某个 crate」 ⚠️ **识别边界见 NEX-52**：词法级识别不覆盖 schema 限定 / SQL 注释 / `REPLACE` / `MERGE` / `COPY` / `TRUNCATE` |
 | #9 | `nexus_repo_does_not_depend_on_the_execution_layer`（`nexus-core`）+ `the_repo_crate_does_not_depend_on_the_execution_layer`（`nexus-repo`）+ `scripts/check-deps.sh` **规则 8** —— 三处共同守护 |
 | #10 | `the_execution_crate_does_not_depend_on_the_upper_layers` 通过（`nexus-service` / `nexus-api` / `nexus-cli` 均不在依赖清单） |
 | #11 | `nexus_model_has_no_database_traces` **仍在** `crates/nexus-core/tests/architecture.rs` 且通过（14 passed） |
@@ -331,3 +343,72 @@ cargo test --workspace --locked  ✓ 零失败
 | `crates/nexus-repo/src/{lease,leases,outbox,outbox_repo}.rs` | **不修改** ✅ |
 | `crates/nexus-repo/tests/{lease_fencing,outbox_idempotency,compile_fail}.rs` | **不修改** ✅ |
 | `crates/nexus-infra/migrations/*` | **不修改** ✅ |
+
+### AI 预审记录（2026-11-06）
+
+**结论**：**changes-requested**（1 条 major）→ 经操作者裁决，按**登记后续任务**处置，**不阻塞合并**。
+
+#### 独立复核通过项（逐条实测）
+
+| 项 | 证据 |
+|---|---|
+| 全量门禁 | 7 个脚本门禁 + `fmt` + `clippy` + `test --workspace` + `examples` **全绿** |
+| **真实 PG 17 下集成测试** | 本地 `nexus-test-pg` 容器 + `DATABASE_URL`，`cargo test --workspace --locked` **零 SKIP**（集成测试**确实执行**，不是静默跳过） |
+| `lease_fencing` | 14 passed（含 `stale_generation_write_is_rejected` / `fenced_counter_increment_is_rejected`） |
+| `outbox_idempotency` | 10 passed（含 `event_and_outbox_are_written_in_the_same_transaction`） |
+| `compile_fail`（AC #13） | 4 passed —— 三条负向样例**仍然编译失败** |
+| AC #15（围栏文本逐字节未变） | `git diff --stat crates/nexus-repo/src/lease.rs` **无输出** ✅ |
+| AC #2（不迁移） | 四个引擎侧持久化文件**仍在原路径** ✅ |
+| 规则 8 能否挡住 `nexus-repo → nexus-execution` | ✅ 注入实测抓到 —— 含 `[dev-dependencies]` 与 `[target.'cfg(unix)'.dependencies]` 两种形态（`grep '^nexus-execution\.workspace'` 锚定行首） |
+| 规则 7 能否挡住 `deps_of` 漂移 | ✅ 注入实测抓到（报出 Cargo.toml 与 deps_of 两侧差异） |
+| 规则 7 是否误算 dev-dep | ✅ 正确排除（只读 `[dependencies]` 段） |
+| 围栏六子句匹配强度 | 只抄**一个**子句（`generation = `）**也会**被抓 ✅ |
+
+#### 发现 1（major）—— 写操作识别的漏判
+
+**位置**：`crates/nexus-core/tests/support/token_scan.rs` 的 `sql_words()`
+
+**实测绕过**（在独立 `git worktree` 注入，主仓库未动）：
+
+```
+INSERT INTO public.workflow_runs (id) VALUES ($1)   => ★绕过★（两条断言全绿）
+INSERT /* 幂等 */ INTO workflow_runs (id) VALUES ($1) => 抓到
+INSERT INTO workflow_runs (id) VALUES ($1) ON CONFLICT (id) DO NOTHING => 抓到
+```
+
+把 `pub const BYPASS_PROBE: &str = "INSERT INTO public.workflow_runs (id) VALUES ($1)";`
+加进 `crates/nexus-repo/src/users.rs` 后，
+`nexus_repo_does_not_touch_workflow_runs` 与
+`workflow_runs_appears_only_in_execution_owned_crates` **两条断言全绿**。
+
+**根因**：`sql_words()` **不剥离 SQL 注释**，且**不处理 schema 限定** ——
+`INSERT INTO public.workflow_runs` 的表名被提取成 `public`。
+另有 `REPLACE INTO` / `MERGE INTO` / `COPY` / `TRUNCATE` / `INSERT OR REPLACE` /
+`UPDATE ONLY` 共 **11 种**形态漏判（完整清单见架构文档 §5.3 的「已知识别边界」表）。
+
+**当前绿灯是真绿**：已逐条核对 `nexus-repo` 对 `workflow_runs` / `workflow_step_runs`
+的**全部**引用 —— `lease.rs` / `leases.rs` / `outbox_repo.rs` / `rows.rs` / `lib.rs`
+里的 5 处提及**全部在文档注释里**，不是 SQL。
+
+**处置**：登记 **NEX-52**（含对抗输入测试 + 故障注入）；
+架构文档 §4.2 差异 1 / §4.3.2 约束 2 / §5.3 的**过度声明**已同步修正。
+
+#### 发现 2（minor）—— 围栏子句匹配的措辞敏感
+
+**位置**：`crates/nexus-execution/tests/architecture.rs` 的
+`the_execution_crate_does_not_inline_fenced_writes`
+
+子串匹配对**措辞**敏感：`generation=?`（无空格）、`GENERATION = ?`（大写）**均逃逸**。
+
+**这不是绕过路径** —— 绕过路径是「复制完整围栏模板到执行层」，
+无论怎么写都会被六子句里任意一条抓到（**当前行为正确**）。
+漏判只影响「**围栏退化**」（少抄一条子句）的检出，属**次要**问题，
+已记入 **NEX-52** 的「关联发现」段落。
+
+### 处置决策
+
+| 决策 | 类别 | 依据 |
+|---|---|---|
+| 缺陷**单独登记**为 NEX-52，**不**在 NEX-37 内就地修复 | decide-and-proceed | 触及**已定稿条款**的评审发现不得就地修复（`ai-sdlc-quality-gates.mdc` §4.2）；且当前**无实际违规**，强行合并会把「依赖方向落地」与「扫描器健壮性」混进同一个评审 |
+| 架构文档与本文件的**过度声明**就地修正 | decide-and-proceed | 「管住**任何 crate 的任何写操作**」与实际识别能力**不符** —— 文档声称与实现不符本身就是缺陷（`check-deps.sh` 规则 7 的注释里已把这称为一种缺陷） |
+| 围栏措辞敏感问题**不在**本次处理 | decide-and-proceed | **不是绕过路径**，当前行为正确；且改它会触及**围栏判定**这条安全机制 |

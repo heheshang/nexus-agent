@@ -264,3 +264,24 @@ T-010（收口）依赖全部
 - AC: `docs/operations/` 有 P6 的运行说明（需要 PostgreSQL 17 的集成测试怎么跑、缺 `DATABASE_URL` 会 panic）
 - AC: `bash scripts/check-docs.sh` 通过；`bash scripts/check-backlog.sh` 通过
 - AC: `cargo fmt --all --check` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo test --workspace --locked` 通过
+
+### T-011 — 修写操作识别的漏判（扫描器健壮性）
+
+**T-001 预审发现的工具缺陷** —— 判定手段本身漏判多种能造成写入的 SQL 形态。
+
+对应 backlog 任务：`backlog/tasks/NEX-52 - fix(core) 修写操作识别的漏判 —— SQL 注释剥离与 schema 限定.md`
+依赖：T-001
+对应设计条款：架构文档 §4.2 差异 1、§4.3.2 约束 2（**已知识别边界**段落）
+
+- AC: `sql_words()` 剥离 `/* ... */` 与 `-- ...` 两种 SQL 注释 —— 注释里的词**不再**被当成表名
+- AC: 表名提取剥离 **schema 限定** —— `public.workflow_runs` 的表名是 `workflow_runs`
+- AC: `REPLACE INTO` / `MERGE INTO` / `COPY ... FROM` / `TRUNCATE TABLE` 被识别为写操作
+- AC: `INSERT OR REPLACE INTO` / `UPDATE ONLY` 这类**修饰词**形态被识别为写操作
+- AC: `crates/nexus-core/tests/token_scan.rs` 的**对抗输入测试**逐条覆盖上述每个形态
+- AC: **故障注入**：`INSERT INTO public.workflow_runs ...` 加进 `nexus-repo` 后，
+  `nexus_repo_does_not_touch_workflow_runs` 与 `workflow_runs_appears_only_in_execution_owned_crates`
+  **两条断言都变红**
+- AC: 读操作与**建表 DDL**仍**不**被误判为写；字符串字面量里的内容仍**不**算写
+- AC: 架构文档 §4.3.2 约束 2 的「识别边界」说明**更新**为修复后的实际覆盖范围
+- AC: `bash scripts/check-naming.sh` / `check-backlog.sh` / `check-specs.sh` / `check-docs.sh` 通过
+- AC: `cargo fmt --all --check` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo test --workspace --locked` 通过
