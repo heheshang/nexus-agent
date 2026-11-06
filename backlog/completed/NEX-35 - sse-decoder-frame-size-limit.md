@@ -198,21 +198,122 @@ P5 的解码器目前只用于**自有格式的回归测试**与未来的 SSE �
 「测试红了」的第一反应应该是「**断言错了还是实现错了**」——
 先分清再改，否则会把测试改成「迎合实现」。
 
-## 故障注入（9 项，最终全部**确实会红**）
+## 实现过程中的发现
 
-在隔离工作树里逐项注入变异，确认对应测试**失败**。
+### 发现 1 —— `Default` 不能 derive —— `usize` 的默认值是 0
+
+`FrameDecoder` 原本 `#[derive(Debug, Default)]`。
+加上 `limit: usize` 字段后，derive 出来的默认值是 **0** ——
+那会让解码器**拒绝一切**非空帧（任何内容都 > 0）。
+
+**修正**：手写 `Default`，`limit` 取 `MAX_FRAME_BYTES`。
+
+**教训**：加了「有默认值语义」的字段后，derive 的默认值**不再**安全。
+`0` 对 `usize` 是**合法**的值 —— 编译器**不会**提醒你。
+
+### 发现 2 —— 超限检查必须在**切走之前**
+
+最初把大小检查放在 `drain(..pos + delim_len)` **之后** ——
+那时超大帧已经**完整搬进** `raw`（又一次完整拷贝）才报错。
+
+**修正**：在 `find_delimiter` 拿到 `pos` 后**立刻**检查，`drain` 之前返回错误。
+
+**教训**：「检查」的位置决定了**峰值内存**。放在拷贝之后 = 峰值 = 2 倍帧大小。
+
+### 发现 3 —— 「无分隔符」这条路径**也要**检查
+
+只在「找到分隔符」的分支里检查大小，会**漏掉**真正的攻击形态 ——
+上游**永远不送分隔符**时，永远走的是「找不到分隔符」的分支。
+
+**修正**：该分支里也检查 `self.buf.len() > self.limit`。
+那里的缓冲区长度就是该帧内容的**长度下界**（只会更大，不会更小）。
+
+### 发现 4 —— 释放缓冲要用 `Vec::new()` 而不是 `clear()`
+
+`clear()` 只把**长度**归零，**容量**还在 —— 那 1 MiB 仍然占着内存。
+而解码器已经不可恢复，这块内存**不会被复用**。
+
+**修正**：`self.buf = Vec::new()`。
+
+**教训**：「不再增长」与「不再占用」是两件事。`clear()` 只满足前者。
+
+⚠️ 这条是**故障注入查出来的** —— 第 1 轮的注入「超限后只 `clear()`」
+**未变红**，因为当时的断言只查**长度**。补了查**容量**的断言后才变红。
+
+### 发现 5 —— 上限约束**保留量**，不约束**瞬时峰值**
+
+`push` 先把整个 chunk 拷进缓冲区，再判断超没超限。
+所以单次传入巨型 chunk 时，峰值内存会短暂达到 `chunk.len() + 旧缓冲`。
+
+**这不是漏洞**：调用方本来就**持有**那个 chunk（上游 socket 读出来的字节），
+我们的拷贝不会让它超出**一个副本**。
+上限防的是「**跨多次 push 累积**」—— 那才是无界的。
+
+**已在 `push` 的文档注释里显式写明** —— 不让读代码的人误以为峰值有界。
+
+### 发现 6 —— 我自己写的两条测试**期望错了**
+
+`an_oversized_frame_is_rejected_without_panicking` 最初用
+「64 字节内容 = 超限」来写 —— 但 64 **恰好等于**上限，应该**成功**。
+结果是返回了 `MalformedFrame`（内容全是 `x`，既无 event 也无 data）。
+
+`the_too_large_error_carries_no_buffered_content` 最初用
+`with_limit(1024)` 塞 35 字节 —— **根本没超限**，所以 `push` 返回 `Ok`。
+
+**修正**：分别改成「65 字节 > 上限 64」与「塞到超过 64」。
+
+**教训**：这两条**不是**实现的问题，是**测试自己写错了**。
+「测试红了」的第一反应应该是「**断言错了还是实现错了**」——
+先分清再改，否则会把测试改成「迎合实现」。
+
+### 发现 7 —— 故障注入第 1 轮有 **4 项未变红**，**3 项是断言太弱**
+
+第 1 轮 11 项里 4 项未变红。逐项查清后：
+
+- **3 项是断言太弱**（只查长度、不查错误内容、只查「报错了」）；
+- **1 项是变异无效**（`raw.len() == pos`，挪检查位置行为完全一样）。
+
+**教训**：这正是 NEX-34 发现 6 的同一条教训，但这次**方向相反** ——
+上一轮是「变异无效」误判成「断言弱」，这一轮**大多数**是「断言弱」误判成「变异无效」。
+**每次都要逐项查清，不能凭印象归类。**
+
+若不分清，3 个真实的**覆盖盲区**会被当成「变异无效」而**永久放过** ——
+那比「变异无效」本身更危险。
+
+## 故障注入（11 项，最终全部**确实会红**）
+
+在隔离工作树（`/tmp/nex35-verify`）里逐项注入变异，确认对应测试**失败**。
+
+⚠️ 纪律（来自 NEX-33 发现 3 / NEX-34 发现 6）：
+**「未变红」有两种成因** —— 变异无效，或**断言抓不住**那类变异。
+两者都必须查清 —— **不分清就会把「覆盖盲区」误当成「变异无效」**。
 
 | # | 注入 | 期望变红 | 结果 |
 |---|---|---|---|
-| 1 | 上限检查改成 `>=`（off-by-one） | `a_frame_exactly_at_the_limit_is_decoded` | FAILED ✓ |
-| 2 | 上限按 `chunk.len()` 而非单帧计 | `the_limit_is_applied_per_frame_not_per_chunk` | FAILED ✓ |
-| 3 | 只在「找到分隔符」分支检查大小 | `an_oversized_frame_without_a_delimiter_is_rejected` | FAILED ✓ |
-| 4 | 超限后只 `clear()` 不释放容量 | `the_decoder_stays_broken_after_exceeding_the_limit` | FAILED ✓ |
-| 5 | 超限后**继续**缓冲（不置不可恢复态） | `the_buffer_stops_growing_after_the_limit_is_exceeded` | FAILED ✓ |
-| 6 | `Display` 里带上缓冲内容 | `the_too_large_error_carries_no_buffered_content` | FAILED ✓ |
-| 7 | CRLF 分支不检查大小 | `the_limit_applies_to_the_crlf_delimiter_variant` | FAILED ✓ |
-| 8 | 大小检查挪到 `drain` 之后 | `an_oversized_frame_after_a_normal_frame_is_rejected` | FAILED ✓ |
-| 9 | `Default` 的 limit 取 0 | `the_default_limit_is_one_mebibyte` | FAILED ✓ |
+| 1 | 上限检查用 `>=`（off-by-one） | `a_frame_exactly_at_the_limit_is_decoded` | FAILED ✓ |
+| 2 | 帧长**含**分隔符 | `the_limit_counts_frame_content_not_the_delimiter` | FAILED ✓ |
+| 3 | 上限按 `chunk.len()` 而非单帧计 | `the_limit_is_applied_per_frame_not_per_chunk` | FAILED ✓ |
+| 4 | 「无分隔符」分支不检查大小 | `an_oversized_frame_without_a_delimiter_is_rejected` | FAILED ✓ |
+| 5 | 超限后只 `clear()` 不释放容量 | `the_decoder_releases_its_buffer_after_exceeding_the_limit` | FAILED ✓ |
+| 6 | 超限后**继续**缓冲（不复位） | `the_decoder_stays_broken_after_exceeding_the_limit` | FAILED ✓ |
+| 7 | 超限后**复位**（允许继续解析） | `the_buffer_stops_growing_after_the_limit_is_exceeded` | FAILED ✓ |
+| 8 | `Display` 里带上缓冲内容 | `the_too_large_error_carries_no_buffered_content` | FAILED ✓ |
+| 9 | CRLF 分支绕过大小检查 | `the_limit_applies_to_the_crlf_delimiter_variant` | FAILED ✓ |
+| 10 | 检查用**整个缓冲区**长度（非当前帧） | `an_oversized_frame_after_a_normal_frame_is_rejected` | FAILED ✓ |
+| 11 | `Default` 的 limit 取 0 | `the_default_limit_is_one_mebibyte` | FAILED ✓ |
+
+### 第 1 轮：4 项**未变红** —— 逐项查清
+
+| # | 现象 | 查清结果 | 处置 |
+|---|---|---|---|
+| 5 | 只 `clear()` 不释放容量 | **断言太弱** —— 只查了**长度**；`clear()` 后长度**确实**是 0 | 新增 `the_decoder_releases_its_buffer_after_exceeding_the_limit`（查**容量**） |
+| 6 | 超限后继续缓冲 | **断言太弱** —— 只查「长度不变」；错误实现会**重新检查大小** → 缓冲区又被清空 → 长度「看起来」没长 | 改为断言「返回**同一个**错误」 |
+| 10 | 检查挪到 `drain` 之后 | **变异无效** —— 原实现里 `raw.len() == pos`，挪位置后行为**完全一样** | 换成**真正**能区分的变异（用整个缓冲区长度） |
+| — | 「正常帧 + 超大帧」只断言「报错了」 | **断言太弱** —— 只断言「报错了」抓不住 #10（两种实现都报错） | 改为断言 `actual == 65`（超大帧**自己**的长度） |
+
+**教训**：第 1 轮的 4 项里，**3 项是断言太弱、1 项是变异无效** ——
+若不分清，就会把 3 个真实的**覆盖盲区**误当成「变异无效」而放过。
+NEX-34 的发现 6 已经吃过一次亏，这次**先查清再动手**。
 
 ## 验证结果
 

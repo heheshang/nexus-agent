@@ -373,7 +373,8 @@
       "layer": "behavior",
       "verified_by": [
         "crates/nexus-api/src/sse.rs::the_buffer_stops_growing_after_the_limit_is_exceeded",
-        "crates/nexus-api/src/sse.rs::the_decoder_stays_broken_after_exceeding_the_limit"
+        "crates/nexus-api/src/sse.rs::the_decoder_stays_broken_after_exceeding_the_limit",
+        "crates/nexus-api/src/sse.rs::the_decoder_releases_its_buffer_after_exceeding_the_limit"
       ],
       "status": "verified"
     },
@@ -383,7 +384,8 @@
       "layer": "behavior",
       "verified_by": [
         "crates/nexus-api/src/sse.rs::a_frame_exactly_at_the_limit_is_decoded",
-        "crates/nexus-api/src/sse.rs::a_frame_one_byte_over_the_limit_is_rejected"
+        "crates/nexus-api/src/sse.rs::a_frame_one_byte_over_the_limit_is_rejected",
+        "crates/nexus-api/src/sse.rs::the_limit_counts_frame_content_not_the_delimiter"
       ],
       "status": "verified"
     },
@@ -412,6 +414,15 @@
       "layer": "behavior",
       "verified_by": [
         "crates/nexus-api/src/sse.rs::the_default_limit_is_one_mebibyte"
+      ],
+      "status": "verified"
+    },
+    {
+      "id": "P5-I37",
+      "statement": "超限时报告的是**超大帧自己**的内容长度 —— 正常帧不被牵连",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-api/src/sse.rs::an_oversized_frame_after_a_normal_frame_is_rejected"
       ],
       "status": "verified"
     }

@@ -99,7 +99,7 @@ P5 完成判据之外的**加固**任务：`FrameDecoder` 的缓冲区当前**�
 
 收口任务 T-006 在本任务之后执行 —— 收口必须覆盖全部 P5 代码改动。
 
-对应 backlog 任务：`backlog/tasks/NEX-35 - sse-decoder-frame-size-limit.md`
+对应 backlog 任务：`backlog/completed/NEX-35 - sse-decoder-frame-size-limit.md`
 依赖：无（T-001 已交付；本任务修改其实现）
 对应设计条款：`docs/specs/p5/spec.md` §3.1.2（半帧缓冲）
 

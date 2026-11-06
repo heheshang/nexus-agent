@@ -651,7 +651,7 @@ mod tests {
         // 分隔符永远不到达 → 缓冲区一直增长。
         let mut d = FrameDecoder::with_limit(64);
 
-        let err = d.push(&vec![b'x'; 65]).unwrap_err();
+        let err = d.push(&[b'x'; 65]).unwrap_err();
         assert_eq!(
             err,
             FrameError::FrameTooLarge {
@@ -666,14 +666,57 @@ mod tests {
         // 超限后**不再继续增长** —— 这是加固的**核心目的**。
         let mut d = FrameDecoder::with_limit(64);
 
-        assert!(d.push(&vec![b'x'; 65]).is_err());
+        let first = d.push(&[b'x'; 65]).unwrap_err();
         let after = d.buffered();
 
         // 继续喂入 —— 缓冲区**不得**增长
         for _ in 0..10 {
-            let _ = d.push(&vec![b'y'; 100]);
+            let err = d.push(&[b'y'; 100]).unwrap_err();
+            // ⚠️ 必须断言**同一个**错误 —— 只断言「长度不变」抓不住
+            // 「超限后继续缓冲」的错误实现（那种实现会重新检查大小，
+            // 于是缓冲区又被清空，长度「看起来」没长）。
+            assert_eq!(err, first, "超限后应返回同一个错误");
             assert_eq!(d.buffered(), after, "超限后缓冲区不得继续增长");
         }
+    }
+
+    #[test]
+    fn the_limit_counts_frame_content_not_the_delimiter() {
+        // ⚠️ 上限约束的是**帧内容**（**不含**分隔符）。
+        //
+        // 这条抓的是「把分隔符也算进帧长」的错误实现 ——
+        // 那样一个**恰好**等于上限的帧会因为多出 2 字节而被误杀。
+        let mut d = FrameDecoder::with_limit(64);
+
+        let mut chunk = b"event: delta\n".to_vec();
+        chunk.extend(std::iter::repeat_n(b'x', 64 - chunk.len()));
+        chunk.extend_from_slice(b"\n\n");
+
+        // 内容 64 字节 + 分隔符 2 字节 = 66 字节总长
+        assert_eq!(chunk.len(), 66, "本测试需要总长超过上限");
+
+        let frames = d.push(&chunk).unwrap();
+        assert_eq!(frames.len(), 1, "内容等于上限时应能解码");
+    }
+
+    #[test]
+    fn the_decoder_releases_its_buffer_after_exceeding_the_limit() {
+        // ⚠️ 断言的是**容量**，不只是**长度**。
+        //
+        // `Vec::clear()` 只把长度归零 —— **容量**还在（那 1 MiB 仍占着内存）。
+        // 解码器已经**不可恢复**，这块内存**不会被复用** → 必须真正释放。
+        //
+        // 这条与 `the_buffer_stops_growing_after_the_limit_is_exceeded`
+        // 抓的是**不同**的东西：那条抓「长度」，这条抓「容量」。
+        let mut d = FrameDecoder::with_limit(64);
+
+        assert!(d.push(&[b'x'; 65]).is_err());
+        assert_eq!(d.buffered(), 0, "超限后缓冲区长度应归零");
+        assert_eq!(
+            d.buf.capacity(),
+            0,
+            "超限后应**释放**容量（clear() 只归零长度，容量仍占着内存）"
+        );
     }
 
     #[test]
@@ -747,10 +790,24 @@ mod tests {
         // 那会让攻击者能**反复**把内存撑到上限（DoS 放大）。
         let mut d = FrameDecoder::with_limit(64);
 
-        let first = d.push(&vec![b'x'; 65]).unwrap_err();
+        let first = d.push(&[b'x'; 65]).unwrap_err();
+
+        // ⚠️ 喂一个**合法**的小帧 —— 若解码器已复位，它会**成功**解码
+        // （返回 `Ok`），而不是报错。
+        //
+        // 只断言「报错」不够：复位后的实现**也会**报错
+        // （只是 `actual` 不同）。所以必须断言**错误内容相同**。
         let second = d.push(b"event: delta\ndata: {}\n\n").unwrap_err();
 
         assert_eq!(first, second, "超限后应返回同一个错误");
+        assert_eq!(
+            first,
+            FrameError::FrameTooLarge {
+                limit: 64,
+                actual: 65,
+            },
+            "错误应保留**首次**超限时的大小（复位后会变成别的 actual）"
+        );
         assert_eq!(d.buffered(), 0, "超限后缓冲区应已释放");
     }
 
@@ -759,9 +816,12 @@ mod tests {
         // 正常帧 + 超大帧（**同一个 chunk**）→ 正常帧产出，
         // 超大帧报错。
         //
-        // ⚠️ 这条抓的是「先无条件 extend 再检查」的错误实现 ——
-        // 那会让超大帧**先**被完整搬进 `raw` 才报错（多一次拷贝，
-        // 而且峰值内存翻倍）。
+        // ⚠️ 这条抓的是「拿**整个缓冲区**长度当帧长」的错误实现 ——
+        // 那会让**正常帧**被误杀（缓冲区里还有超大帧）。
+        //
+        // ⚠️ 必须断言 **`actual` 是 65**（超大帧**自己**的内容长度），
+        // 而**不是**整个 chunk 的长度（87）——
+        // 只断言「报错了」抓不住这个变异（两种实现都报错）。
         let mut d = FrameDecoder::with_limit(64);
 
         let mut chunk = b"event: ok\ndata: {}\n\n".to_vec();
@@ -769,6 +829,14 @@ mod tests {
         chunk.extend_from_slice(b"\n\n");
 
         let err = d.push(&chunk).unwrap_err();
-        assert!(matches!(err, FrameError::FrameTooLarge { .. }));
+        assert_eq!(
+            err,
+            FrameError::FrameTooLarge {
+                limit: 64,
+                // ⚠️ 超大帧**自己**的内容长度 —— 不是整个 chunk 的长度
+                actual: 65,
+            },
+            "应报告**超大帧**自己的长度（正常帧不应被牵连）"
+        );
     }
 }
