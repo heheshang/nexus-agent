@@ -1,7 +1,7 @@
 ---
 id: NEX-37
 title: "feat(execution): 引擎侧持久化归属落地（新增依赖 + 修订已定稿条款）"
-status: To Do
+status: In Progress
 assignee: []
 labels: [execution, crate-boundary, contract-revision]
 priority: high
@@ -87,22 +87,26 @@ references:
 
 ## Acceptance Criteria
 
-- [ ] #1 `crates/nexus-execution/Cargo.toml` **新增** `nexus-repo.workspace = true`；`scripts/check-deps.sh` 的 `deps_of nexus-execution` **新增** `nexus-repo`；`bash scripts/check-deps.sh` 通过（规则 7：`deps_of` ↔ `Cargo.toml` 一致）
-- [ ] #2 引擎侧持久化模块**留在** `nexus-repo` —— `crates/nexus-repo/src/lease.rs` / `leases.rs` / `outbox.rs` / `outbox_repo.rs` **继续存在**（**不迁移**、**不删除**、**不改路径**）
-- [ ] #3 架构文档 **§4.2 差异 1** 已修订为「`nexus-execution` **依赖** `nexus-repo`，但 `workflow_runs` / `workflow_step_runs` 的**写入权**仍由执行层独占」
-- [ ] #4 架构文档 **§4.3 目标态表**的 `nexus-execution → nexus-repo` 行已修订（设计目标改为「**依赖**」，并注明 P6 · D12 选项 B 的裁决与落地状态）
-- [ ] #5 架构文档 **§4.3.2 约束 2** 已修订为「`workflow_runs` / `workflow_step_runs` 的**写操作**（`INSERT` / `UPDATE` / `DELETE`）**只允许**发生在 `nexus-execution`；`nexus-infra` 允许**建表 DDL**（迁移），不是访问」
-- [ ] #6 架构文档 **§4.4** 已新增**规则 4**：「`nexus-execution → nexus-repo` 允许，`nexus-repo → nexus-execution` 禁止（反向会成环）」
-- [ ] #7 架构文档 **§5.3** 的 `workflow_runs` 那一行与 **§6.3** 的「crate 边界与 trait 归属」条目**同步更新** —— §4.1 / §4.2 / §4.3 / §4.3.2 / §4.4 / §5.3 **六处一致**，**不留半截矛盾**
-- [ ] #8 架构测试 `workflow_runs_appears_only_in_execution_owned_crates` 已修订 —— 判定从「**类型**只允许出现在某处」改为「**写操作**只允许出现在 `nexus-execution`」；断言**不得**被改弱成「只看某个 crate」
-- [ ] #9 新增架构测试断言 `nexus-repo` **不得**依赖 `nexus-execution`（反向会成环）
-- [ ] #10 架构测试断言 `nexus-execution` **不依赖** `nexus-service` / `nexus-api` / `nexus-cli` **仍然成立**（不因新增依赖而放宽或删除）
-- [ ] #11 架构测试断言 `nexus-model` **无**数据库 schema 痕迹 **仍然成立**（不因新增依赖而放宽或删除）
-- [ ] #12 `crates/nexus-execution` 的**围栏写**必须**经由** `nexus-repo` 的带租约 API —— 执行层**不自己**拼围栏 SQL（结构层断言）
-- [ ] #13 NEX-12 的三条 **trybuild 负向测试**（`RunLease` 无 `generation()` / 不可直接构造 / 围栏写必须带 `&RunLease`）**留在** `crates/nexus-repo/tests/`，且**仍然编译失败**
-- [ ] #14 围栏的**变异测试仍然会红** —— 删掉 `generation` 条件时 `lease_fencing` 的对应测试**必须失败**（断言被改弱即为回归）
-- [ ] #15 `Fence::CONDITIONS_TEMPLATE` 的**文本逐字节不变** —— 围栏条件的六个子句与绑定顺序**不改**
-- [ ] #16 `cargo fmt --all --check` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo test --workspace --locked` 通过
+> **验证记录（2026-11-06，S4 实现完成）**：
+> 每条 AC 的判据与**可复核证据**列在文末「交付验证记录」。
+> 未打勾的 #17 是**人工评审**项 —— 它**阻塞合并**，不阻塞实现。
+
+- [x] #1 `crates/nexus-execution/Cargo.toml` **新增** `nexus-repo.workspace = true`；`scripts/check-deps.sh` 的 `deps_of nexus-execution` **新增** `nexus-repo`；`bash scripts/check-deps.sh` 通过（规则 7：`deps_of` ↔ `Cargo.toml` 一致）
+- [x] #2 引擎侧持久化模块**留在** `nexus-repo` —— `crates/nexus-repo/src/lease.rs` / `leases.rs` / `outbox.rs` / `outbox_repo.rs` **继续存在**（**不迁移**、**不删除**、**不改路径**）
+- [x] #3 架构文档 **§4.2 差异 1** 已修订为「`nexus-execution` **依赖** `nexus-repo`，但 `workflow_runs` / `workflow_step_runs` 的**写入权**仍由执行层独占」
+- [x] #4 架构文档 **§4.3 目标态表**的 `nexus-execution → nexus-repo` 行已修订（设计目标改为「**依赖**」，并注明 P6 · D12 选项 B 的裁决与落地状态）
+- [x] #5 架构文档 **§4.3.2 约束 2** 已修订为「`workflow_runs` / `workflow_step_runs` 的**写操作**（`INSERT` / `UPDATE` / `DELETE`）**只允许**发生在 `nexus-execution`；`nexus-infra` 允许**建表 DDL**（迁移），不是访问」
+- [x] #6 架构文档 **§4.4** 已新增**规则 4**：「`nexus-execution → nexus-repo` 允许，`nexus-repo → nexus-execution` 禁止（反向会成环）」
+- [x] #7 架构文档 **§5.3** 的 `workflow_runs` 那一行与 **§6.3** 的「crate 边界与 trait 归属」条目**同步更新** —— §4.1 / §4.2 / §4.3 / §4.3.2 / §4.4 / §5.3 **六处一致**，**不留半截矛盾**
+- [x] #8 架构测试 `workflow_runs_appears_only_in_execution_owned_crates` 已修订 —— 判定从「**类型**只允许出现在某处」改为「**写操作**只允许出现在 `nexus-execution`」；断言**不得**被改弱成「只看某个 crate」
+- [x] #9 新增架构测试断言 `nexus-repo` **不得**依赖 `nexus-execution`（反向会成环）
+- [x] #10 架构测试断言 `nexus-execution` **不依赖** `nexus-service` / `nexus-api` / `nexus-cli` **仍然成立**（不因新增依赖而放宽或删除）
+- [x] #11 架构测试断言 `nexus-model` **无**数据库 schema 痕迹 **仍然成立**（不因新增依赖而放宽或删除）
+- [x] #12 `crates/nexus-execution` 的**围栏写**必须**经由** `nexus-repo` 的带租约 API —— 执行层**不自己**拼围栏 SQL（结构层断言）
+- [x] #13 NEX-12 的三条 **trybuild 负向测试**（`RunLease` 无 `generation()` / 不可直接构造 / 围栏写必须带 `&RunLease`）**留在** `crates/nexus-repo/tests/`，且**仍然编译失败**
+- [x] #14 围栏的**变异测试仍然会红** —— 删掉 `generation` 条件时 `lease_fencing` 的对应测试**必须失败**（断言被改弱即为回归）
+- [x] #15 `Fence::CONDITIONS_TEMPLATE` 的**文本逐字节不变** —— 围栏条件的六个子句与绑定顺序**不改**
+- [x] #16 `cargo fmt --all --check` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo test --workspace --locked` 通过
 - [ ] #17 本任务已通过**人工评审**，且 AI 产出的改动有**额外一名评审**的签字（`ai-sdlc-quality-gates.mdc` 的契约级变更要求）
 
 ## DoR 判定
@@ -217,3 +221,113 @@ OQ-1 已由**操作者裁决**（选项 B），不是待定标记。
   AC #14 与 AC #15 各从两侧锁住它（变异仍会红 + 文本相等）。
 - **可逆性**：n/a（不动作）。
 - **影响面**：`crates/nexus-repo/src/lease.rs`。
+
+## 交付验证记录（2026-11-06，S4 实现完成 / S5 三层验证）
+
+> 每条 AC 的判据、**可复核证据**（精确到测试函数名、文件路径、命令输出）。
+> 评审时可**逐条复现** —— 不接受笼统判断。
+
+### 新增 / 修改的断言清单
+
+| # | 断言 | 位置 | 层 |
+|---|---|---|---|
+| 1 | `workflow_runs_appears_only_in_execution_owned_crates` | `crates/nexus-core/tests/architecture.rs` | 结构层（**已改写**：类型归属 → 写操作归属） |
+| 2 | `nexus_repo_does_not_touch_workflow_runs` | `crates/nexus-core/tests/architecture.rs` | 结构层（**已收紧**：不得引用 → 不得**写**） |
+| 3 | `nexus_repo_does_not_depend_on_the_execution_layer` | `crates/nexus-core/tests/architecture.rs` | 结构层（**新增**） |
+| 4 | `nexus_repo_must_not_write_execution_owned_tables` | `crates/nexus-repo/tests/architecture.rs` | 结构层（**已改写**，替换原 `nexus_repo_must_not_reference_execution_owned_tables`） |
+| 5 | `the_repo_crate_does_not_depend_on_the_execution_layer` | `crates/nexus-repo/tests/architecture.rs` | 结构层（**新增**） |
+| 6 | `the_execution_crate_depends_on_the_data_layer` | `crates/nexus-execution/tests/architecture.rs` | 结构层（**新增**） |
+| 7 | `the_execution_crate_does_not_depend_on_the_upper_layers` | `crates/nexus-execution/tests/architecture.rs` | 结构层（**新增**） |
+| 8 | `the_execution_crate_does_not_inline_fenced_writes` | `crates/nexus-execution/tests/architecture.rs` | 结构层（**新增**） |
+| 9 | `the_execution_crate_writes_no_unrelated_tables` | `crates/nexus-execution/tests/architecture.rs` | 结构层（**新增**） |
+| 10 | `extract_sql_writes` / `ScanResult::writes_table` | `crates/nexus-core/tests/support/token_scan.rs` | 结构层**底层工具**（**新增**） |
+| 11 | `a_sql_write_is_distinguished_from_a_sql_read` 等 **5 条** | `crates/nexus-core/tests/token_scan.rs` | 结构层工具的**对抗输入**测试（**新增**） |
+
+### AC 逐条证据
+
+| AC | 证据 |
+|---|---|
+| #1 | `crates/nexus-execution/Cargo.toml` 含 `nexus-repo.workspace = true`；`scripts/check-deps.sh` 的 `deps_of nexus-execution` 含 `nexus-repo`；`bash scripts/check-deps.sh` 输出「规则 7：deps_of 与各 crate 的 Cargo.toml 必须一致 ✓」 |
+| #2 | `crates/nexus-repo/src/{lease,leases,outbox,outbox_repo}.rs` **四个文件仍在原路径**；`git diff --stat crates/nexus-repo/src/` 对这四个文件**无输出**（除 `lease.rs` 的临时变异，已还原） |
+| #3 ~ #7 | 架构文档 §4.2 差异 1 / §4.3 目标态表 / §4.3.2 约束 2 / §4.4 规则 4 / §5.3 / §6.3 **六处一致**；§5.3 表格的 `workflow_runs` 行与 §4.3 目标态表均标 ✅ **已落地**；§6.3 的「crate 边界与 trait 归属」条目补记「NEX-37 / T-001 已落地」 |
+| #8 | `workflow_runs_appears_only_in_execution_owned_crates` 现在的判据是 `scanned.writes_table(table)`（**写**过），允许集为**全 workspace** 的「除 `nexus-execution` 外**任何** crate」；判据**不是**「只看某个 crate」 |
+| #9 | `nexus_repo_does_not_depend_on_the_execution_layer`（`nexus-core`）+ `the_repo_crate_does_not_depend_on_the_execution_layer`（`nexus-repo`）+ `scripts/check-deps.sh` **规则 8** —— 三处共同守护 |
+| #10 | `the_execution_crate_does_not_depend_on_the_upper_layers` 通过（`nexus-service` / `nexus-api` / `nexus-cli` 均不在依赖清单） |
+| #11 | `nexus_model_has_no_database_traces` **仍在** `crates/nexus-core/tests/architecture.rs` 且通过（14 passed） |
+| #12 | `the_execution_crate_does_not_inline_fenced_writes` 判据是围栏条件的**六个子句逐条**匹配 `FENCE_CLAUSES`（`generation = ` / `lease_owner = ` / `lease_until > ` / `deadline_at > ` / `status = 'running'`）—— 只抄五个**也会**被抓 |
+| #13 | `cargo test -p nexus-repo --test compile_fail` → **4 passed**（`fenced_write_requires_a_lease` / `run_lease_cannot_be_constructed_directly` / `run_lease_has_no_generation_accessor` / `framework_self_check`）—— 三个负向样例**仍然编译失败** |
+| #14 | **故障注入实测**（见下表）—— 围栏真的失效时 `stale_generation_write_is_rejected` 与 `fenced_counter_increment_is_rejected` **都**变红 |
+| #15 | `crates/nexus-repo/src/lease.rs` 的 `Fence::CONDITIONS_TEMPLATE` **逐字节未变**（`git diff` 对该文件**无输出**）；六个子句与绑定顺序由 `conditions_list_all_six_clauses_in_bind_order` 断言 |
+| #16 | `cargo fmt --all --check` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` **零告警**；`DATABASE_URL=… cargo test --workspace --locked` **零失败**（含真实 PostgreSQL 17 的集成测试） |
+| #17 | ⏳ **待人工评审** —— 阻塞合并 |
+
+### 故障注入记录（AC #14 与「断言真的有效」）
+
+> 三次注入，**每次都先验证会红，再还原**。
+> 这是「断言被改弱即为回归」的**直接证据**。
+
+| # | 注入什么 | 期望 | 实际 | 还原 |
+|---|---|---|---|---|
+| 1 | 把 `crates/nexus-repo/src/users.rs` 的一条 `INSERT INTO users …` 改成 `INSERT INTO workflow_runs …` | 三条「写操作归属」断言**全部**变红 | ✅ `nexus_repo_must_not_write_execution_owned_tables`、`nexus_repo_does_not_touch_workflow_runs`、`workflow_runs_appears_only_in_execution_owned_crates` **三条全红**，并精确报出文件名与表名 | ✅ `cp /tmp/users.rs.bak`，`git diff` 无输出 |
+| 2 | 在 `crates/nexus-execution/src/lib.rs` 内联一条含 `generation = ` / `lease_owner = ` 的围栏 UPDATE | `the_execution_crate_does_not_inline_fenced_writes` 变红 | ✅ 变红，并**逐条**报出命中的围栏子句 | ✅ 还原，`git diff` 无输出 |
+| 3 | 从 `Fence::CONDITIONS_TEMPLATE` 删掉 `generation` 条件**并同步删掉对应绑定**（否则只会得到语法错误，测不出 fencing 失效） | `stale_generation_write_is_rejected` / `fenced_counter_increment_is_rejected` 变红 | ✅ **两条都变红** —— 报的是「过期 generation 的写入必须被 fencing 拒绝（影响 0 行）」这一**行为**，不是 SQL 文本 | ✅ 还原，`grep -c 'generation = ?'` = 2，`git diff` 无输出 |
+
+> ⚠️ **注入 3 的关键设计**：只删模板里的 `generation` 子句**不足以**验证变异测试的有效性 ——
+> 那只会产生「绑定点数量不匹配」的语法错误，测试红得**不是因为 fencing 失效**。
+> 同步删掉绑定后，围栏**真的**不再校验 `generation`，
+> 测试**才**红在「僵尸写入被放行」这个**正确的原因**上。
+
+### 门禁全绿记录（2026-11-06）
+
+```
+bash scripts/check-lock.sh      ✓ 全部检查通过
+bash scripts/check-deps.sh      ✓ 依赖方向检查全部通过（含新增的规则 8）
+bash scripts/check-naming.sh    ✓ 标识符命名检查全部通过
+bash scripts/check-backlog.sh   ✓ 全部检查通过
+bash scripts/check-specs.sh     ✓ Spec 层组织纪律检查全部通过
+bash scripts/check-rules.sh     ✓ 全部检查通过
+bash scripts/check-docs.sh      ✓ 全部检查通过
+cargo fmt --all --check         ✓
+cargo clippy --workspace --all-targets --locked -- -D warnings   ✓ 零告警
+cargo test --workspace --locked  ✓ 零失败
+```
+
+### 契约升格
+
+`docs/specs/p6/contracts/invariants.json` 的 **11 条**不变量由 `planned` 升格为 `verified`：
+
+| 不变量 | 证据 |
+|---|---|
+| P6-I01 | `nexus-repo/src/lease.rs::conditions_list_all_six_clauses_in_bind_order` |
+| P6-I02 | `nexus-repo/tests/lease_fencing.rs::stale_generation_write_is_rejected`（**已做故障注入**） |
+| P6-I03 | `nexus-repo/tests/compile_fail.rs::fenced_write_requires_a_lease` |
+| P6-I04 | `nexus-repo/tests/compile_fail.rs::run_lease_cannot_be_constructed_directly` |
+| P6-I05 | `nexus-repo/tests/compile_fail.rs::run_lease_has_no_generation_accessor` |
+| P6-I06 | `nexus-execution/tests/architecture.rs::the_execution_crate_depends_on_the_data_layer` |
+| P6-I07 | `nexus-execution/tests/architecture.rs::the_execution_crate_does_not_depend_on_the_upper_layers` |
+| P6-I08 | `nexus-core/tests/architecture.rs::workflow_runs_appears_only_in_execution_owned_crates` |
+| P6-I49 | `nexus-repo/tests/architecture.rs::the_repo_crate_does_not_depend_on_the_execution_layer` |
+| P6-I50 | `nexus-execution/tests/architecture.rs::the_execution_crate_does_not_inline_fenced_writes` |
+| P6-I51 | `nexus-core/tests/architecture.rs::workflow_runs_appears_only_in_execution_owned_crates` |
+
+`bash scripts/check-specs.sh` 规则 3 校验「`verified` 的 `verified_by` 指向的测试**必须真的存在**」—— 通过。
+
+### 受影响面（实际）
+
+| 位置 | 变更 |
+|---|---|
+| `crates/nexus-execution/Cargo.toml` | **修改**（`nexus-repo.workspace = true` 已在 `783f310`；本次新增 `[dev-dependencies] syn`） |
+| `crates/nexus-execution/tests/architecture.rs` | **新增**（4 条结构层断言） |
+| `crates/nexus-core/tests/support/token_scan.rs` | **修改**（新增 `SqlWrite` / `extract_sql_writes` / `ScanResult::writes_table`） |
+| `crates/nexus-core/tests/token_scan.rs` | **修改**（新增 5 条对抗输入测试） |
+| `crates/nexus-core/tests/architecture.rs` | **修改**（2 条改写 + 1 条新增） |
+| `crates/nexus-repo/tests/architecture.rs` | **修改**（1 条改写 + 1 条新增 + token_scan include） |
+| `crates/nexus-repo/Cargo.toml` | **修改**（新增 `[dev-dependencies] syn`） |
+| `scripts/check-deps.sh` | **修改**（新增规则 8） |
+| `Cargo.lock` | **修改**（两个 crate 的 dev-dependency `syn`） |
+| `docs/architecture/…-architecture-design.md` | **修改**（§4.2 / §4.3 / §4.4 / §5.3 / §6.3 同步 + 落地记录） |
+| `docs/specs/p6/contracts/invariants.json` | **修改**（11 条升格 `verified`） |
+| `docs/specs/p6-tiering.md` | **修改**（判定手段表：需修订 → 已落地） |
+| `crates/nexus-repo/src/{lease,leases,outbox,outbox_repo}.rs` | **不修改** ✅ |
+| `crates/nexus-repo/tests/{lease_fencing,outbox_idempotency,compile_fail}.rs` | **不修改** ✅ |
+| `crates/nexus-infra/migrations/*` | **不修改** ✅ |

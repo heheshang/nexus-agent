@@ -242,7 +242,7 @@ P6 **明显**能拆成多个可独立评审的任务：
 |---|---|---|
 | 条款 | §4.2 差异 1 / §4.3.2 约束 2 | §4.2 差异 1 / §4.3.2 约束 2（**已修订**） |
 | 判定手段 | `nexus-repo` **不得引用** `workflow_runs` 的**类型** | `workflow_runs` / `workflow_step_runs` 的**写操作**（`INSERT` / `UPDATE` / `DELETE`）**只允许**出现在 `nexus-execution` |
-| 对应测试 | `workflow_runs_appears_only_in_execution_owned_crates`（允许集断言） | **需修订**：改为「写操作归属」判定（T-001 的 AC） |
+| 对应测试 | `workflow_runs_appears_only_in_execution_owned_crates`（允许集断言） | **已落地**（NEX-37 / T-001）：改为「写操作归属」判定 —— `nexus-core` 的 `workflow_runs_appears_only_in_execution_owned_crates` + `nexus_repo_does_not_touch_workflow_runs` + `nexus-repo` 的 `nexus_repo_must_not_write_execution_owned_tables` |
 | 强度 | 可被「把类型下沉到 `nexus-repo`」绕过 | 管住**任何 crate 的任何写操作** —— **不降** |
 
 **时间盒与自主回退**（类别 (b) 的强制内容）：

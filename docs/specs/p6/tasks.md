@@ -76,6 +76,14 @@ T-010（收口）依赖全部
 - AC: `bash scripts/check-deps.sh` 通过（规则 7：`deps_of` ↔ `Cargo.toml` 一致）
 - AC: `cargo fmt --all --check` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo test --workspace --locked` 通过
 
+> ✅ **T-001 已落地**（2026-11-06，NEX-37）——
+> 依赖边、文档修订与架构断言**全部**完成；`docs/specs/p6/contracts/invariants.json`
+> 的 P6-I01 ~ I08 / I49 / I50 / I51 共 **11 条**不变量已由 `planned` 升格为 `verified`。
+>
+> ⚠️ **剩余**：**人工评审**（AC #17）—— 触及**已定稿条款**（架构文档 §6.3 第 5 项），
+> 需人工批准**且** AI 产出的改动需**额外一名评审**。
+> 该门槛**阻塞合并**，不阻塞后续任务的推进。
+
 ### T-002 — 落地冻结定义与图编译
 
 **`nexus-workflow` 的地基**：定义冻结 + 结构化图 → 可执行图。

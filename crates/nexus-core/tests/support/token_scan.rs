@@ -110,6 +110,35 @@ pub struct ScanResult {
     pub strings: BTreeSet<String>,
     /// 解析失败的文件（路径 → 错误信息）。
     pub parse_errors: Vec<(PathBuf, String)>,
+    /// 源码里的 **SQL 写操作**（按字典序）。
+    ///
+    /// # 为什么需要**单独**收集
+    ///
+    /// 「某个 crate 能不能写某张表」这个判定的**原始形态**是
+    /// 「这段 SQL 是不是 `INSERT` / `UPDATE` / `DELETE` 那张表」。
+    ///
+    /// 只看标识符或字符串，判不出「这句话**是**写操作」——
+    /// 「`SELECT * FROM workflow_runs`」与
+    /// 「`INSERT INTO workflow_runs ...`」**都**含表名，
+    /// 但前者是**读**，后者是**写**。
+    ///
+    /// 架构文档 §4.2 差异 1（决策 D12 · 选项 B）要求的正是这个区分：
+    /// `workflow_runs` 的**写操作**只允许出现在 `nexus-execution`。
+    pub sql_writes: BTreeSet<SqlWrite>,
+}
+
+/// 一条 **SQL 写操作**。
+///
+/// # 字段为什么这么少
+///
+/// 只保留**能判定归属**的信息：操作种类与**目标表**。
+/// 判定「这个 crate 能不能写这张表」只需要这两样。
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SqlWrite {
+    /// 操作种类（`INSERT` / `UPDATE` / `DELETE`）。
+    pub operation: String,
+    /// 目标表名。
+    pub table: String,
 }
 
 impl ScanResult {
@@ -147,6 +176,22 @@ impl ScanResult {
     /// 「`axum` 和 `sse` 都出现过」**不算**。
     pub fn has_path(&self, path: &str) -> bool {
         self.paths.contains(path)
+    }
+
+    /// 源码里是否**写**过某张表。
+    ///
+    /// # 与 [`ScanResult::mentions`] 的区别
+    ///
+    /// `mentions` 判的是「**提到**过」—— 读与写**不分**。
+    /// 本方法判的是「**写**过」—— 只有 `INSERT` / `UPDATE` / `DELETE`
+    /// 才算。
+    ///
+    /// 架构文档 §4.2 差异 1 判定的正是后者：
+    /// `workflow_runs` 的**写入权**归执行层独占。
+    pub fn writes_table(&self, table: &str) -> bool {
+        self.sql_writes
+            .iter()
+            .any(|w| w.table.eq_ignore_ascii_case(table))
     }
 }
 
@@ -199,6 +244,8 @@ struct Collector {
     strings: BTreeSet<String>,
     /// 是否收集字符串字面量。
     collect_strings: bool,
+    /// 收集到的 SQL 写操作。
+    sql_writes: BTreeSet<SqlWrite>,
 }
 
 impl Collector {
@@ -209,6 +256,7 @@ impl Collector {
             calls: self.calls,
             strings: self.strings,
             parse_errors: Vec::new(),
+            sql_writes: self.sql_writes,
         }
     }
 
@@ -327,6 +375,15 @@ impl<'ast> Visit<'ast> for Collector {
         if self.collect_strings {
             self.strings.insert(lit.value());
         }
+        // ⚠️ SQL 写操作的识别**独立**于 `collect_strings` ——
+        //
+        // 「这个 crate 能不能写这张表」是**安全**判定，
+        // 不是「顺便看看」的观察。哪怕调用方只用了 `code_only` 视图，
+        // 写操作的判定也必须成立 ——
+        // 否则「用 `code_only` 扫描」就成了一条绕过写权限的路径。
+        for write in extract_sql_writes(&lit.value()) {
+            self.sql_writes.insert(write);
+        }
         syn::visit::visit_lit_str(self, lit);
     }
 
@@ -350,6 +407,181 @@ impl<'ast> Visit<'ast> for Collector {
         }
         syn::visit::visit_attribute(self, attr);
     }
+}
+
+/// 从一段 SQL 文本里提取**写操作**及其目标表。
+///
+/// # 判据
+///
+/// 只认三种操作：`INSERT` / `UPDATE` / `DELETE`。
+/// 读操作（`SELECT`）**不算** —— 架构文档 §4.2 差异 1 判定的
+/// 是**写入权**，读不构成写入。
+///
+/// # 为什么用**逐词**扫描而不是「找 `INSERT INTO` 子串」
+///
+/// SQL 的写法很多：
+///
+/// | 写法 | 子串匹配能识别吗 |
+/// |---|---|
+/// | `INSERT INTO t (...)` | ✅ |
+/// | `insert into t (...)` | ✅（若大小写不敏感） |
+/// | `INSERT  INTO t`（多空格） | ❌ |
+/// | `INSERT\nINTO t`（换行） | ❌ |
+/// | `UPDATE t SET ...` | ✅ |
+/// | `WITH x AS (...) UPDATE t SET ...` | ❌ |
+///
+/// 而**表名**的提取更麻烦：`INSERT INTO schema.table`、
+/// `UPDATE "workflow_runs" SET ...`（带引号）都存在。
+///
+/// 逐词扫描把它们统一成「词序列」：
+///
+/// ```text
+/// INSERT INTO workflow_runs   →  ["insert", "into", "workflow_runs"]
+/// UPDATE "workflow_runs" SET  →  ["update", "workflow_runs", "set"]
+/// ```
+///
+/// 然后按**词的位置**判定操作与目标表。
+///
+/// # 为什么**不能**把「含表名的字符串」都算成写
+///
+/// 那会把 `SELECT * FROM workflow_runs` 也算成写 ——
+/// 而 §4.2 差异 1 判的是**写入权**。读写不分，判定就失去意义。
+///
+/// # 建表 DDL 为什么**不算**写操作
+///
+/// `CREATE TABLE workflow_runs (...)` 是**建表**，不是**访问**。
+/// 架构文档 §4.3.2 约束 2 明确允许 `nexus-infra` 做建表 DDL。
+/// `CREATE` 不在写操作的三种里 —— 这是**刻意的**。
+///
+/// # 词法规则
+///
+/// - 标识符：`[A-Za-z_][A-Za-z0-9_$]*`
+/// - 引号标识符：`"..."` —— 去掉引号后按普通标识符处理
+/// - 字符串字面量：`'...'` —— **整体跳过**（它是值，不是表名）
+/// - 其它字符一律是分隔符
+pub fn extract_sql_writes(sql: &str) -> Vec<SqlWrite> {
+    let words = sql_words(sql);
+    let mut writes = Vec::new();
+
+    let mut index = 0;
+    while index < words.len() {
+        // ⚠️ 关键字匹配**大小写不敏感** ——
+        // SQL 的关键字大小写不敏感（`insert into` 与 `INSERT INTO` 等价），
+        // 只认大写会在小写写法上**静默漏报**。
+        let keyword = words[index].to_ascii_lowercase();
+        match keyword.as_str() {
+            "insert" => {
+                // `INSERT INTO <table>` —— `INTO` 可省略（`INSERT <table>`）。
+                let mut cursor = index + 1;
+                if words
+                    .get(cursor)
+                    .is_some_and(|w| w.eq_ignore_ascii_case("into"))
+                {
+                    cursor += 1;
+                }
+                if let Some(table) = words.get(cursor) {
+                    writes.push(SqlWrite {
+                        operation: "INSERT".to_string(),
+                        table: table.clone(),
+                    });
+                }
+                index = cursor;
+            }
+            "update" => {
+                if let Some(table) = words.get(index + 1) {
+                    writes.push(SqlWrite {
+                        operation: "UPDATE".to_string(),
+                        table: table.clone(),
+                    });
+                }
+                index += 1;
+            }
+            "delete" => {
+                // `DELETE FROM <table>` —— `FROM` 可省略（`DELETE <table>`）。
+                let mut cursor = index + 1;
+                if words
+                    .get(cursor)
+                    .is_some_and(|w| w.eq_ignore_ascii_case("from"))
+                {
+                    cursor += 1;
+                }
+                if let Some(table) = words.get(cursor) {
+                    writes.push(SqlWrite {
+                        operation: "DELETE".to_string(),
+                        table: table.clone(),
+                    });
+                }
+                index = cursor;
+            }
+            _ => index += 1,
+        }
+    }
+
+    writes
+}
+
+/// 把一段 SQL 拆成**词序列**。
+///
+/// # 为什么跳过字符串字面量
+///
+/// `'...'` 里的一切都是**值**，不是标识符 ——
+/// `WHERE name = 'update workflow_runs'` 里的 `update` 不是写操作。
+fn sql_words(sql: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let chars: Vec<char> = sql.chars().collect();
+    let mut index = 0;
+
+    while index < chars.len() {
+        let ch = chars[index];
+        match ch {
+            // 单引号字符串 —— **整体跳过**。
+            '\'' => {
+                index += 1;
+                while index < chars.len() {
+                    if chars[index] == '\'' {
+                        // `''` 是转义的单引号 —— 不算结束。
+                        if chars.get(index + 1) == Some(&'\'') {
+                            index += 2;
+                            continue;
+                        }
+                        break;
+                    }
+                    index += 1;
+                }
+                index += 1;
+            }
+            // 双引号标识符 —— 去掉引号，按普通标识符处理。
+            '"' => {
+                index += 1;
+                let mut name = String::new();
+                while index < chars.len() && chars[index] != '"' {
+                    name.push(chars[index]);
+                    index += 1;
+                }
+                index += 1;
+                if !name.is_empty() {
+                    words.push(name);
+                }
+            }
+            // 标识符字符。
+            c if c.is_ascii_alphabetic() || c == '_' => {
+                let mut name = String::new();
+                while index < chars.len() {
+                    let c = chars[index];
+                    if c.is_ascii_alphanumeric() || c == '_' || c == '$' {
+                        name.push(c);
+                        index += 1;
+                    } else {
+                        break;
+                    }
+                }
+                words.push(name);
+            }
+            _ => index += 1,
+        }
+    }
+
+    words
 }
 
 /// 递归收集目录下的所有 `.rs` 文件。
@@ -402,6 +634,7 @@ pub fn scan_dir(dir: &Path, collect_strings: bool) -> ScanResult {
                 merged.paths.extend(result.paths);
                 merged.calls.extend(result.calls);
                 merged.strings.extend(result.strings);
+                merged.sql_writes.extend(result.sql_writes);
             }
             Err(err) => merged.parse_errors.push((file, err.to_string())),
         }

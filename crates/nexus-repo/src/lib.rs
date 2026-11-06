@@ -32,11 +32,20 @@
 //! 是**单向**的 —— 本 crate 依赖它们只是为了**实现它们的 trait**。
 //! 绝不能反向（架构文档 §4.1.2），由 `scripts/check-deps.sh` 规则 5 强制。
 //!
-//! # 本 crate **不碰**的表
+//! # 本 crate **不写**的表
 //!
-//! `workflow_runs` 与 `workflow_step_runs` 由 `nexus-execution` **独占**
-//! （架构文档 §4.2 差异 1）—— 它们的行类型也在 `nexus-execution`，
+//! `workflow_runs` 与 `workflow_step_runs` 的**写入权**由 `nexus-execution`
+//! **独占**（架构文档 §4.2 差异 1）—— 它们的**行类型**也在 `nexus-execution`，
 //! 不在本 crate。
+//!
+//! ⚠️ **判定手段是「写操作」不是「引用」**（2026-11-06 修订，决策 D12 · 选项 B）：
+//! 依赖方向改为 `nexus-execution → nexus-repo` 后，本 crate 的类型对**所有**
+//! 依赖它的 crate **可见** —— 于是「本 crate 不持有该**类型**」**推不出**
+//! 「别的 crate 写不了」。
+//!
+//! 所以约束落在**写操作**上：这两张表的 `INSERT` / `UPDATE` / `DELETE`
+//! **只允许**出现在 `nexus-execution`。见
+//! `crates/nexus-repo/tests/architecture.rs::nexus_repo_must_not_write_execution_owned_tables`。
 //!
 //! # SQL 校验方式
 //!
