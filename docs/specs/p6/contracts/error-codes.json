@@ -1,0 +1,72 @@
+{
+  "$schema": "nexus-agent/error-code-contract/v1",
+  "spec": "p6",
+  "$comment": [
+    "P6 允许触碰的业务码白名单。",
+    "门禁 scripts/check-specs.sh 用它核对：",
+    "  1. crates/nexus-core/src/error.rs 的码值表与本文件逐条一致（P6 不得改码值）",
+    "  2. nexus-execution 的源码里出现的 ErrorCode::<Variant> 都在白名单内（P6 不得新增码值）",
+    "",
+    "P6 **不新增**任何业务码 —— 42 个码已由架构文档 §6.3 定稿。",
+    "P6 需要的一切失败语义都能由既有码表达（见 spec.md §2.1）。",
+    "",
+    "⚠️ 白名单是**逐 Spec** 判定 —— 不能用其他 Spec 的并集。",
+    "⚠️ nexus-workflow 的错误码不在本文件的白名单里 —— 因为本 Spec 的 crate 字段",
+    "   指向 nexus-execution。nexus-workflow 引入的错误码必须在",
+    "   T-002 ~ T-004 落地时同步登记到本文件，否则 check-specs.sh 规则 5 会拦下。"
+  ],
+  "source_of_truth": "crates/nexus-core/src/error.rs",
+  "whitelist": [
+    { "code": 10001, "variant": "InvalidParam", "retry": "Terminal" },
+    { "code": 30004, "variant": "RunNotFound", "retry": "Terminal" },
+    { "code": 30005, "variant": "WorkflowDsl", "retry": "Terminal" },
+    { "code": 30006, "variant": "BudgetExceeded", "retry": "Terminal" },
+    { "code": 30007, "variant": "RunConflict", "retry": "Terminal" },
+    { "code": 50001, "variant": "ModelUnavailable", "retry": "Retryable" },
+    { "code": 60006, "variant": "StorageUnavailable", "retry": "Retryable" },
+    { "code": 70001, "variant": "ToolNotFound", "retry": "Terminal" },
+    { "code": 70002, "variant": "ToolFailed", "retry": "UnknownOutcome" },
+    { "code": 90001, "variant": "Internal", "retry": "Terminal" },
+    { "code": 90003, "variant": "ServiceUnavailable", "retry": "Retryable" }
+  ],
+  "forbidden": [
+    {
+      "variant": "新增任何 ErrorCode 变体",
+      "reason": "架构文档 §6.3 已定稿 42 个业务码。新增需架构文档同步 + 契约测试更新 + 标注破坏性变更。"
+    },
+    {
+      "variant": "ToolFailed -> 映射为可重试",
+      "reason": "ToolFailed 是 UnknownOutcome —— 工具可能已产生副作用（支付、写库）。自动重试会重复执行。这与 P3 / P4 的白名单纪律是同一条。"
+    },
+    {
+      "variant": "取消 -> 映射为 Internal",
+      "reason": "取消不是失败。架构文档 §2.1 的取消语义；终态是 canceled，事实由事件与指标承载。"
+    },
+    {
+      "variant": "needs_attention -> 映射为 failed 或复用同一个码",
+      "reason": "参考架构 Phase 9 已知坑 #1 —— needs_attention 是「结果未知，等人工核对」，failed 是「确定失败」。合并后运维看不出哪些 run 需要人管。"
+    },
+    {
+      "variant": "版本不匹配 -> 映射为可重试",
+      "reason": "definition_hash / engine_version / graph_schema 不一致时重试无意义 —— 同一份定义会再撞一次同一堵墙。RunConflict 是终止型。"
+    },
+    {
+      "variant": "审批指纹不匹配 -> 静默恢复",
+      "reason": "参数变了说明审批批的不是这次调用。静默恢复等于绕过人工审批。"
+    },
+    {
+      "variant": "在事件负载或响应里暴露 cause",
+      "reason": "架构文档 §2.6.5 —— 内部原因绝不外泄。AppError 根本不实现 Serialize。"
+    },
+    {
+      "variant": "把围栏的 generation 条件改成可选",
+      "reason": "围栏是「僵尸 worker 不能覆盖新 worker 写入」的唯一保证。少一个条件 = 整个持久执行模型静默失效。"
+    }
+  ],
+  "internal_cause_never_leaks": {
+    "statement": "cause 不进入对外响应或事件负载（架构文档 §2.6.5）",
+    "enforced_by": [
+      "crates/nexus-execution/tests/events.rs::an_event_payload_carries_no_internal_cause"
+    ]
+  }
+}

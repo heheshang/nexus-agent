@@ -1,0 +1,685 @@
+{
+  "$schema": "nexus-agent/spec-contract/v1",
+  "spec": "p6",
+  "specRef": "docs/specs/p6/spec.md",
+  "phase": "P6",
+  "crate": "nexus-execution",
+  "crates": [
+    "nexus-execution",
+    "nexus-workflow"
+  ],
+  "$comment": [
+    "P6 的不变量契约。",
+    "",
+    "status 语义（scripts/check-specs.sh 规则 3）：",
+    "  verified —— 该不变量**已有**证据；verified_by 指向的测试必须**真的存在**。",
+    "  planned —— 该不变量已**声明**，证据将在对应 Task 落地时产生；",
+    "              此时 verified_by 指向的测试文件可能还不存在。",
+    "",
+    "「planned 不等于可以糊弄」：规则 3b 会在该 Spec 的**全部任务都归档**后",
+    "要求所有 planned 提升为 verified —— 届时测试必须存在，否则门禁红。",
+    "",
+    "这解决了 S2 必须先于 S4 的顺序问题：Spec 在实现之前落盘，",
+    "契约声明**先于**证据产生，但证据缺失时门禁**不会**因此被绕过。",
+    "",
+    "⚠️ crates 字段是**逐 Spec** 判定 —— P6 覆盖 nexus-execution 与 nexus-workflow **两个** crate。",
+    "nexus-workflow 的不变量**也在本文件里**声明（同一份 P6 契约），",
+    "check-specs.sh 规则 5 扫描 crates 字段列出的**每一个** crate 的源码（NEX-49）——",
+    "所以本文件的顶层 crate 字段保持 nexus-execution，",
+    "nexus-workflow 的结构性断言（P6-I22 ~ I24）由 T-003 / T-004 自己在",
+    "crates/nexus-workflow/tests/ 里落地，并由 P6-I22 ~ I24 的 verified_by 指向。",
+    "",
+    "⚠️ **每条不变量**可以有自己的 crate 字段（2026-11-06 新增）——",
+    "「逐 Spec 判定」指的是**顶层 crate 字段**（规则 5 扫哪个 crate 的源码）。",
+    "**逐条**不变量的 crate 字段说明的是「这条不变量**约束的对象**是哪个 crate」，",
+    "用于人工复核 `verified_by` 指向的测试与被约束方是否对得上。",
+    "",
+    "决策 D12（选项 B）落地后，引擎侧持久化**留在 nexus-repo** ——",
+    "所以 P6-I01 ~ I05 与 P6-I49 约束的对象是 nexus-repo，",
+    "P6-I06 / P6-I08 / P6-I50 约束的对象是 nexus-execution，",
+    "P6-I51 约束的对象是 nexus-infra。",
+    "**不是并集**：每条只归属一个 crate。"
+  ],
+  "error_codes": {
+    "$comment": "P6 复用的 nexus-core 已定稿业务码 —— 不得新增，不得改值。",
+    "source": "crates/nexus-core/src/error.rs",
+    "allowed": [
+      {
+        "code": 10001,
+        "variant": "InvalidParam",
+        "retry": "Terminal"
+      },
+      {
+        "code": 30004,
+        "variant": "RunNotFound",
+        "retry": "Terminal"
+      },
+      {
+        "code": 30005,
+        "variant": "WorkflowDsl",
+        "retry": "Terminal"
+      },
+      {
+        "code": 30006,
+        "variant": "BudgetExceeded",
+        "retry": "Terminal"
+      },
+      {
+        "code": 30007,
+        "variant": "RunConflict",
+        "retry": "Terminal"
+      },
+      {
+        "code": 50001,
+        "variant": "ModelUnavailable",
+        "retry": "Retryable"
+      },
+      {
+        "code": 60006,
+        "variant": "StorageUnavailable",
+        "retry": "Retryable"
+      },
+      {
+        "code": 70001,
+        "variant": "ToolNotFound",
+        "retry": "Terminal"
+      },
+      {
+        "code": 70002,
+        "variant": "ToolFailed",
+        "retry": "UnknownOutcome"
+      },
+      {
+        "code": 90001,
+        "variant": "Internal",
+        "retry": "Terminal"
+      },
+      {
+        "code": 90003,
+        "variant": "ServiceUnavailable",
+        "retry": "Retryable"
+      }
+    ]
+  },
+  "invariants": [
+    {
+      "id": "P6-I01",
+      "statement": "围栏条件只有一处定义 —— 留在 nexus-repo，文本逐字节不变",
+      "layer": "structure",
+      "crate": "nexus-repo",
+      "verified_by": [
+        "crates/nexus-repo/src/lease.rs::conditions_list_all_six_clauses_in_bind_order"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I02",
+      "statement": "围栏的变异测试仍然会红 —— 删掉 generation 条件必须失败",
+      "layer": "behavior",
+      "crate": "nexus-repo",
+      "verified_by": [
+        "crates/nexus-repo/tests/lease_fencing.rs::stale_generation_write_is_rejected"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I03",
+      "statement": "围栏写必须带 &RunLease —— 类型级保证（trybuild 负向测试）",
+      "layer": "type",
+      "crate": "nexus-repo",
+      "verified_by": [
+        "crates/nexus-repo/tests/compile_fail.rs::fenced_write_requires_a_lease"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I04",
+      "statement": "RunLease 不可直接构造 —— 只能由 claim 领取获得",
+      "layer": "type",
+      "crate": "nexus-repo",
+      "verified_by": [
+        "crates/nexus-repo/tests/compile_fail.rs::run_lease_cannot_be_constructed_directly"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I05",
+      "statement": "RunLease 上没有 generation() —— 调用方拿不到裸 generation",
+      "layer": "type",
+      "crate": "nexus-repo",
+      "verified_by": [
+        "crates/nexus-repo/tests/compile_fail.rs::run_lease_has_no_generation_accessor"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I06",
+      "statement": "nexus-execution 依赖 nexus-repo —— 引擎侧持久化留在 nexus-repo（决策 D12 选项 B）",
+      "layer": "structure",
+      "crate": "nexus-execution",
+      "verified_by": [
+        "crates/nexus-execution/tests/architecture.rs::the_execution_crate_depends_on_the_data_layer"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I07",
+      "statement": "nexus-execution 不依赖 nexus-service / nexus-api / nexus-cli",
+      "layer": "structure",
+      "crate": "nexus-execution",
+      "verified_by": [
+        "crates/nexus-execution/tests/architecture.rs::the_execution_crate_does_not_depend_on_the_upper_layers"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I08",
+      "statement": "workflow_runs / workflow_step_runs 的写操作只在 nexus-execution —— 写入权唯一",
+      "layer": "structure",
+      "crate": "nexus-execution",
+      "verified_by": [
+        "crates/nexus-core/tests/architecture.rs::workflow_runs_appears_only_in_execution_owned_crates"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I09",
+      "statement": "定义哈希与键序无关 —— 规范化保证哈希稳定",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-workflow/src/definition.rs::the_definition_hash_is_key_order_independent"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I10",
+      "statement": "冻结定义是三件套 —— canonical / hash / engine_version 缺一不可",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-workflow/src/definition.rs::the_frozen_definition_carries_all_three_parts"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I11",
+      "statement": "触发语义是 AllPredecessor —— 所有前驱完成才触发",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-workflow/tests/graph.rs::a_node_waits_for_all_of_its_predecessors"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I12",
+      "statement": "图有环时编译失败 —— 不是死循环",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-workflow/tests/graph.rs::a_cyclic_graph_fails_to_compile"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I13",
+      "statement": "子图递归被检测 —— 自引用编译失败，不是无限展开",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-workflow/tests/graph.rs::a_recursive_subgraph_is_rejected"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I14",
+      "statement": "展开上限三个各自生效 —— 深度 8 / 节点 128 / 状态 4 MiB",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-workflow/tests/graph.rs::the_nesting_depth_limit_is_enforced",
+        "crates/nexus-workflow/tests/graph.rs::the_expanded_node_count_limit_is_enforced",
+        "crates/nexus-workflow/tests/graph.rs::the_state_size_limit_is_enforced"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I15",
+      "statement": "超限映射到 BudgetExceeded —— 不是 panic",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-workflow/tests/graph.rs::an_expansion_limit_is_reported_as_budget_exceeded"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I16",
+      "statement": "条件求值失败是错误 —— 不是 false（否则走错分支）",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-workflow/tests/node.rs::a_failed_condition_evaluation_is_an_error",
+        "crates/nexus-workflow/tests/node.rs::a_missing_condition_variable_is_an_error",
+        "crates/nexus-workflow/tests/node.rs::a_non_boolean_condition_result_is_an_error"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I17",
+      "statement": "模板渲染保留原始类型 —— 整串 {{...}} 时数字仍是数字",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-workflow/tests/node.rs::a_whole_string_template_keeps_the_original_type"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I18",
+      "statement": "插值结果仍含 {{ 时报错 —— 未解析的工具参数模板",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-workflow/tests/node.rs::an_unresolved_template_is_rejected"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I19",
+      "statement": "审批指纹是确定性的 —— 同样的三元组得到同样的 args_hash",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-workflow/src/interrupt.rs::the_args_hash_is_deterministic"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I20",
+      "statement": "参数变化导致审批失效 —— args_hash 不同",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-workflow/src/interrupt.rs::a_changed_parameter_changes_the_args_hash"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I21",
+      "statement": "恢复时二次校验 args_hash —— 不一致拒绝恢复",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-execution/tests/approval.rs::a_mismatched_args_hash_blocks_the_resume"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I22",
+      "statement": "审批能力走类型隔离 —— 已授权作用域的构造函数模块私有",
+      "layer": "type",
+      "verified_by": [
+        "crates/nexus-workflow/tests/architecture.rs::the_approved_scope_cannot_be_constructed_from_outside"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I23",
+      "statement": "审批能力不走 context / 不走参数传递",
+      "layer": "structure",
+      "verified_by": [
+        "crates/nexus-workflow/tests/architecture.rs::the_workflow_crate_does_not_pass_approval_capability_through_context"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I24",
+      "statement": "nexus-workflow 的节点执行热路径不含 Box<dyn>",
+      "layer": "structure",
+      "verified_by": [
+        "crates/nexus-workflow/tests/architecture.rs::the_workflow_crate_does_not_use_box_dyn_on_the_node_hot_path"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I25",
+      "statement": "版本三元组任一不同即拒绝续跑",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-execution/tests/driver.rs::a_changed_definition_hash_blocks_the_resume",
+        "crates/nexus-execution/tests/driver.rs::a_changed_engine_version_blocks_the_resume",
+        "crates/nexus-execution/tests/driver.rs::a_changed_graph_schema_blocks_the_resume"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I26",
+      "statement": "版本不匹配映射到 RunConflict —— 不新增业务码",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-execution/tests/driver.rs::a_version_mismatch_is_reported_as_a_run_conflict"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I27",
+      "statement": "needs_attention 不合并进 failed —— 落库状态不同",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-execution/tests/driver.rs::needs_attention_is_a_distinct_persisted_status"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I28",
+      "statement": "操作幂等命中 —— 同参数重复调用返回旧输出，不重新执行",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-execution/tests/operation.rs::a_succeeded_operation_is_returned_from_the_ledger"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I29",
+      "statement": "参数变化导致冲突 —— 不复用旧结果",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-execution/tests/operation.rs::a_changed_args_hash_is_a_conflict"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I30",
+      "statement": "manual 策略的执行者丢失把操作标 unknown —— 不自动重试",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-execution/tests/operation.rs::a_lost_executor_marks_a_manual_operation_unknown"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I31",
+      "statement": "unknown 操作要求人工核对 —— 不重放",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-execution/tests/operation.rs::an_unknown_operation_is_not_replayed"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I32",
+      "statement": "attempt 上限是配置项 —— 改配置即改上限",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-execution/src/operation.rs::the_attempt_limit_comes_from_the_configuration"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I33",
+      "statement": "三种 replay_policy 各自有行为 —— 不是只测 readonly",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-execution/tests/operation.rs::a_readonly_operation_is_retryable",
+        "crates/nexus-execution/tests/operation.rs::an_idempotent_operation_is_retryable",
+        "crates/nexus-execution/tests/operation.rs::a_manual_operation_is_not_retryable"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I34",
+      "statement": "检查点绑定版本三元组 —— 读比对既有 run 与当前进程常量",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-execution/tests/checkpoint.rs::a_checkpoint_with_a_mismatched_version_is_rejected"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I35",
+      "statement": "检查点覆盖写 —— 同 run_id + checkpoint_id 不产生重复行",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-execution/tests/checkpoint.rs::a_checkpoint_is_overwritten_not_duplicated"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I36",
+      "statement": "审批批准后 run 回到 queued —— 可续跑",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-execution/tests/approval.rs::an_approved_run_becomes_queued_again"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I37",
+      "statement": "审批拒绝后 run 变成 canceled 且 generation 加一",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-execution/tests/approval.rs::a_rejected_run_is_canceled_with_a_new_generation"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I38",
+      "statement": "重复的同决策是幂等的 —— 不报冲突",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-execution/tests/approval.rs::repeating_the_same_decision_is_idempotent"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I39",
+      "statement": "冲突的决策被拒绝 —— 同 interrupt 不同决策",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-execution/tests/approval.rs::a_conflicting_decision_is_rejected"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I40",
+      "statement": "过期的审批被拒绝 —— expires_at 已过不得写入决策",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-execution/tests/approval.rs::an_expired_approval_is_rejected"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I41",
+      "statement": "取消保留不确定性 —— 在途 manual 操作标 unknown，不是 abandoned",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-execution/tests/cancel.rs::canceling_marks_an_in_flight_manual_operation_unknown"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I42",
+      "statement": "取消的顺序不可调换 —— 先保留不确定性，再 fence 执行者",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-execution/tests/cancel.rs::the_uncertainty_is_preserved_before_the_executor_is_fenced"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I43",
+      "statement": "人工核对必须带 evidence —— 无 evidence 的核对被拒绝",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-execution/tests/cancel.rs::a_reconciliation_without_evidence_is_rejected"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I44",
+      "statement": "核对后 operation 成功、run 回到 queued 且 generation 加一",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-execution/tests/cancel.rs::a_reconciliation_requeues_the_run_with_a_new_generation"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I45",
+      "statement": "副作用不重复执行 —— UnknownOutcome 的端到端语义",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-execution/tests/cancel.rs::an_unknown_outcome_does_not_repeat_the_side_effect"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I46",
+      "statement": "取消不映射为 Internal —— 取消不是失败",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-execution/tests/cancel.rs::a_cancellation_is_not_mapped_to_internal"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I47",
+      "statement": "nexus-execution 不含 axum / Router —— P6 不交付 HTTP 端点",
+      "layer": "structure",
+      "verified_by": [
+        "crates/nexus-execution/tests/architecture.rs::the_execution_crate_exposes_no_http_endpoints"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I48",
+      "statement": "事件负载不含内部原因 —— cause 不进入 execution_events",
+      "layer": "behavior",
+      "verified_by": [
+        "crates/nexus-execution/tests/events.rs::an_event_payload_carries_no_internal_cause"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I49",
+      "statement": "nexus-repo 不依赖 nexus-execution —— 反向依赖会成环（架构文档 §4.4 规则 4）",
+      "layer": "structure",
+      "crate": "nexus-repo",
+      "verified_by": [
+        "crates/nexus-repo/tests/architecture.rs::the_repo_crate_does_not_depend_on_the_execution_layer"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I50",
+      "statement": "nexus-execution 的围栏写经由 nexus-repo 的带租约 API —— 执行层不自己拼围栏 SQL",
+      "layer": "structure",
+      "crate": "nexus-execution",
+      "verified_by": [
+        "crates/nexus-execution/tests/architecture.rs::the_execution_crate_does_not_inline_fenced_writes"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P6-I51",
+      "statement": "nexus-infra 只建表不访问 workflow_runs —— 迁移 DDL 不是写操作",
+      "layer": "structure",
+      "crate": "nexus-infra",
+      "verified_by": [
+        "crates/nexus-core/tests/architecture.rs::workflow_runs_appears_only_in_execution_owned_crates"
+      ],
+      "status": "planned"
+    }
+  ],
+  "pipeline_order": [
+    "definition_freeze",
+    "graph_compile",
+    "node_execution",
+    "interrupt_proposal",
+    "driver",
+    "operation_ledger",
+    "checkpoint",
+    "approval_resume",
+    "cancellation_and_reconciliation",
+    "closeout"
+  ],
+  "decisions": [
+    {
+      "id": "D12",
+      "decision": "引擎侧持久化（lease / leases / outbox_repo + 引擎侧行类型）留在 nexus-repo；nexus-execution 新增依赖 nexus-repo；workflow_runs 的写入权判定从「类型归属」改为「写操作归属」",
+      "basis": "docs/specs/p6/spec.md §7.1 —— 操作者 2026-11-06 裁决为选项 B：§4.1 的 crate 图本就画着 EXE --> REPO；围栏条件「只有一处定义」的纪律不受影响；迁移是纯 churn，改文档的成本远低",
+      "category": "timeboxed",
+      "timebox_deadline": "2026-11-13",
+      "autonomous_fallback": "到期无人干预时按选项 B 执行（依赖边是加法、文档修订可 git revert）",
+      "review_requirement": "修订了架构文档 §6.3 第 5 项「crate 边界与 trait 归属」的已定稿条款 —— 需人工评审，AI 产出的改动需额外一名评审"
+    },
+    {
+      "id": "D13",
+      "decision": "P6 不交付 workflows / workflow_versions 的写入；集成测试自带种子数据",
+      "basis": "docs/specs/p6/spec.md §7.2 —— 工作流定义的 CRUD 属产品侧，不是执行侧",
+      "category": "decide-and-proceed"
+    },
+    {
+      "id": "D14",
+      "decision": "三种 replay_policy 全做（readonly / idempotent / manual）",
+      "basis": "docs/specs/p6/spec.md §7.3 —— 架构文档附录 C 把「端到端不重复副作用」的验证责任指派给 P6；manual 策略是唯一实现路径",
+      "category": "decide-and-proceed"
+    },
+    {
+      "id": "D15",
+      "decision": "图编译的输入是结构化 JSON，不做 DSL 文本前端",
+      "basis": "docs/specs/p6/spec.md §7.4 —— DSL 语法是产品选择；参考架构 §5.3 局限 #5 要求只做一套引擎",
+      "category": "decide-and-proceed"
+    },
+    {
+      "id": "D16",
+      "decision": "版本不匹配 / 审批指纹不匹配统一映射到 RunConflict（30007）",
+      "basis": "docs/specs/p6/spec.md §7.5 —— 架构文档 §6.3 已定稿 42 个业务码，新增码是破坏性变更",
+      "category": "decide-and-proceed"
+    },
+    {
+      "id": "D17",
+      "decision": "审批的 HTTP 端点与 nexus-service 接线不在 P6",
+      "basis": "docs/specs/p6/spec.md §7.6 —— nexus-service 是 7 行空壳；P5 的决策 D9 已定业务编排属 nexus-service",
+      "category": "decide-and-proceed"
+    },
+    {
+      "id": "D18",
+      "decision": "run 生命周期的指标口径不在 P6",
+      "basis": "docs/specs/p6/spec.md §7.7 —— 架构文档 §5.6 的指标基线属 P9；P6 由事件流承载可观测性",
+      "category": "decide-and-proceed"
+    }
+  ],
+  "excluded": [
+    {
+      "item": "DSL 文本前端（用户手写工作流定义）",
+      "reason": "决策 D15（OQ-2）—— 登记为 F4"
+    },
+    {
+      "item": "workflows / workflow_versions 的写入方",
+      "reason": "决策 D13（OQ-5）—— 登记为 F6"
+    },
+    {
+      "item": "审批的 HTTP 端点与 nexus-service 接线",
+      "reason": "决策 D17（OQ-6）—— 登记为 F5"
+    },
+    {
+      "item": "共享容量（advisory lock / FenceRun）",
+      "reason": "参考架构 §3.6 —— 属容量治理，登记为 F7"
+    },
+    {
+      "item": "run 生命周期的 Prometheus 指标口径",
+      "reason": "决策 D18（OQ-7）—— 属 P9 / 架构文档 §5.6，登记为 F8"
+    },
+    {
+      "item": "MCP / A2A 集成",
+      "reason": "属 P8（nexus-mcp / nexus-a2a）"
+    },
+    {
+      "item": "RAG / 记忆 / 知识库节点的具体实现",
+      "reason": "属 P7；P6 的节点执行用注入的 trait"
+    },
+    {
+      "item": "新增任何 ErrorCode 变体",
+      "reason": "架构文档 §6.3 已定稿 42 个业务码"
+    },
+    {
+      "item": "把 UnknownOutcome 当可重试处理",
+      "reason": "架构文档 §2.6.3 —— 结果未知的错误不能自动重试"
+    },
+    {
+      "item": "把 needs_attention 合并进 failed",
+      "reason": "参考架构 Phase 9 已知坑 #1 —— 合并后运维看不出哪些 run 需要人工核对"
+    }
+  ]
+}
