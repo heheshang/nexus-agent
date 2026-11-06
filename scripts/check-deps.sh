@@ -32,7 +32,7 @@ deps_of() {
         nexus-ingestion)     echo "nexus-core nexus-config nexus-model nexus-infra nexus-observability" ;;
         nexus-capacity)      echo "nexus-core nexus-config nexus-model nexus-observability" ;;
         nexus-workflow)      echo "nexus-core nexus-config nexus-model nexus-llm nexus-tool nexus-rag nexus-observability" ;;
-        nexus-execution)     echo "nexus-core nexus-config nexus-model nexus-llm nexus-tool nexus-workflow nexus-capacity nexus-infra nexus-observability nexus-security" ;;
+        nexus-execution)     echo "nexus-core nexus-config nexus-model nexus-llm nexus-tool nexus-workflow nexus-capacity nexus-infra nexus-observability nexus-security nexus-repo" ;;
         nexus-repo)          echo "nexus-core nexus-config nexus-model nexus-infra nexus-observability nexus-security nexus-capacity nexus-rag nexus-ingestion nexus-vector" ;;
         nexus-agent)         echo "nexus-core nexus-config nexus-model nexus-llm nexus-tool nexus-observability nexus-security" ;;
         nexus-memory)        echo "nexus-core nexus-config nexus-model nexus-llm nexus-observability nexus-security nexus-vector nexus-ingestion" ;;

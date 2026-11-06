@@ -17,6 +17,7 @@ nexus-capacity.workspace = true
 nexus-infra.workspace = true
 nexus-observability.workspace = true
 nexus-security.workspace = true
+nexus-repo.workspace = true
 
 serde.workspace = true
 serde_json.workspace = true
