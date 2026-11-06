@@ -21,6 +21,8 @@ tokio-util.workspace = true
 futures.workspace = true
 
 [dev-dependencies]
+# token 级源码扫描（结构层断言的底层工具）
+syn.workspace = true
 # 负向测试框架：断言「写错的代码编译不过」（架构文档 §5.2）
 trybuild.workspace = true
 # 取消语义的单元测试需要异步运行时（workspace 的 tokio 已含 rt/macros/sync）

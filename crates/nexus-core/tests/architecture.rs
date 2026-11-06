@@ -21,6 +21,16 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+// include 共享实现 —— `crates/nexus-core/tests/support/token_scan.rs`
+//
+// ⚠️ 为什么用 `#[path]` 而不是抽一个 crate
+//
+// 抽 crate 会**新增**一条依赖边，而本仓库的依赖方向是**已定稿**条款
+// （架构文档 §6.3 第 5 项）。`#[path]` include 只需要**文件系统**上的相对路径，
+// **不产生任何依赖边** —— `Cargo.toml` 完全不动。
+#[path = "support/token_scan.rs"]
+mod token_scan;
+
 /// workspace 根目录。
 fn workspace_root() -> PathBuf {
     // CARGO_MANIFEST_DIR = crates/nexus-core，上溯两级是 workspace 根
@@ -278,7 +288,16 @@ fn sqlx_appears_only_in_data_access_layers() {
 fn nexus_model_has_no_database_traces() {
     // 设计文档 §4.2 差异 2：nexus-model 只放纯 DTO，
     // 不带 FromRow / sqlx::Type —— 领域概念与数据库列布局分离。
-    const FORBIDDEN: &[&str] = &["FromRow", "sqlx::", "Type> for", "sqlx_macros"];
+    //
+    // ⚠️ 用 **token 级**扫描（[`token_scan`]）——
+    // 文档注释里提到 `FromRow` 是**说明性文字**，不是数据库痕迹。
+    // 旧的手写词法器**没有字符字面量状态**，字符 `'"'` 会让注释**不再被剥**。
+    //
+    // ⚠️ 判据是**标识符精确匹配** ——
+    // 「`sqlx` 这个**词**出现过」，而不是「源码里有 `sqlx::` 这个**字符串**」。
+    // 后者对 `sqlx::` 的写法很敏感（`use sqlx::Type` 与 `sqlx::Type` 都行，
+    // 但 `sqlx ::Type` 就不行）—— 那是**文本形态**的脆弱性。
+    const FORBIDDEN: &[&str] = &["FromRow", "sqlx", "sqlx_macros"];
 
     let src_dir = workspace_root()
         .join("crates")
@@ -291,8 +310,15 @@ fn nexus_model_has_no_database_traces() {
     let mut violations = Vec::new();
     for file in walk_rs(&src_dir) {
         let content = std::fs::read_to_string(&file).expect("读取源文件失败");
+        let scanned = token_scan::scan_code(&content).unwrap_or_else(|e| {
+            panic!(
+                "解析 {} 失败：{e} —— 解析失败会让扫描结果**不完整**，\
+                 那正是「静默失效」的形态",
+                file.display()
+            )
+        });
         for pat in FORBIDDEN {
-            if strip_comments(&content).contains(pat) {
+            if scanned.identifiers.contains(*pat) {
                 violations.push(format!("{} 含数据库痕迹：{pat}", file.display()));
             }
         }
@@ -339,8 +365,14 @@ fn nexus_repo_does_not_touch_workflow_runs() {
     let mut violations = Vec::new();
     for file in walk_rs(&src_dir) {
         let content = std::fs::read_to_string(&file).expect("读取源文件失败");
-        let code = strip_comments(&content);
-        if code.contains("workflow_runs") {
+        let scanned = token_scan::scan_code(&content).unwrap_or_else(|e| {
+            panic!(
+                "解析 {} 失败：{e} —— 解析失败会让扫描结果**不完整**，\
+                 那正是「静默失效」的形态",
+                file.display()
+            )
+        });
+        if scanned.identifiers.contains("workflow_runs") {
             violations.push(format!("{} 引用了 workflow_runs", file.display()));
         }
     }
@@ -412,9 +444,18 @@ fn workflow_runs_appears_only_in_execution_owned_crates() {
 
         for file in walk_rs(&src_dir) {
             let content = std::fs::read_to_string(&file).expect("读取源文件失败");
-            let code = strip_comments(&content);
+            // ⚠️ 用 `code_and_strings` —— 表名**既**可能是标识符，
+            // **也**可能是 SQL 字符串里的表名（`"SELECT * FROM workflow_runs"`）。
+            // 只扫标识符会**漏掉**后者，而那**正是**要防的。
+            let scanned = token_scan::scan_code_and_strings(&content).unwrap_or_else(|e| {
+                panic!(
+                    "解析 {} 失败：{e} —— 解析失败会让扫描结果**不完整**，\
+                     那正是「静默失效」的形态",
+                    file.display()
+                )
+            });
             for table in EXCLUSIVE_TABLES {
-                if code.contains(table) {
+                if scanned.mentions(table) {
                     violations.push(format!(
                         "{}（crate `{crate_name}`）引用了 `{table}`",
                         file.display()
@@ -430,73 +471,6 @@ fn workflow_runs_appears_only_in_execution_owned_crates() {
          `nexus-execution`（独占方）与 `nexus-infra`（迁移 DDL）中：\n{}",
         violations.join("\n")
     );
-}
-
-/// 剥掉 Rust 源码里的**注释**，只留下真正的代码。
-///
-/// # 为什么需要
-///
-/// 「文档注释里提到 `FromRow`」是**说明性文字**（比如
-/// 「本 crate 不含 `FromRow`」），**不是**数据库痕迹。
-/// 早先的版本直接扫全文，会把这些说明文字判成违规 ——
-/// 那意味着**写清楚边界反而会让门禁红**。
-///
-/// 剥离规则（够用即可，不追求完整的词法分析）：
-/// - 行注释 `// ...`（含 `///` 与 `//!`）
-/// - 块注释 `/* ... */`
-///
-/// 字符串字面量里的 `//` 会被误剥离 —— 那会让扫描**更宽松**
-/// （漏报），不会造成误报。对「禁止出现某关键词」的检查来说，
-/// 偏宽松是可以接受的：真正的保证来自依赖层（`nexus-model` 不依赖 sqlx）。
-fn strip_comments(source: &str) -> String {
-    let mut out = String::with_capacity(source.len());
-    let mut chars = source.chars().peekable();
-    let mut in_block_comment = false;
-    let mut in_string = false;
-
-    while let Some(c) = chars.next() {
-        if in_block_comment {
-            if c == '*' && chars.peek() == Some(&'/') {
-                chars.next();
-                in_block_comment = false;
-            }
-            continue;
-        }
-        if in_string {
-            out.push(c);
-            if c == '\\' {
-                if let Some(next) = chars.next() {
-                    out.push(next);
-                }
-                continue;
-            }
-            if c == '"' {
-                in_string = false;
-            }
-            continue;
-        }
-        match c {
-            '/' if chars.peek() == Some(&'/') => {
-                // 行注释：跳过到行尾。
-                for next in chars.by_ref() {
-                    if next == '\n' {
-                        out.push('\n');
-                        break;
-                    }
-                }
-            }
-            '/' if chars.peek() == Some(&'*') => {
-                chars.next();
-                in_block_comment = true;
-            }
-            '"' => {
-                in_string = true;
-                out.push(c);
-            }
-            _ => out.push(c),
-        }
-    }
-    out
 }
 
 #[test]
@@ -574,27 +548,4 @@ fn walk_rs(dir: &Path) -> Vec<PathBuf> {
         }
     }
     out
-}
-
-#[test]
-fn strip_comments_removes_doc_comments_but_keeps_code() {
-    // 文档注释里的 `FromRow` 是说明文字，不是数据库痕迹。
-    let source = r#"
-//! 本 crate 不含 FromRow。
-use serde::Serialize;
-/// 行注释里的 sqlx:: 也要剥掉。
-/* 块注释里的 FromRow 同样剥掉。 */
-pub struct Foo;
-"#;
-    let stripped = strip_comments(source);
-    assert!(
-        !stripped.contains("FromRow"),
-        "文档注释未被剥离：{stripped}"
-    );
-    assert!(!stripped.contains("sqlx::"), "行注释未被剥离：{stripped}");
-    assert!(
-        stripped.contains("use serde::Serialize;"),
-        "代码被误剥离：{stripped}"
-    );
-    assert!(stripped.contains("pub struct Foo;"));
 }

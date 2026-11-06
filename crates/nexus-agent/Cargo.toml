@@ -26,6 +26,10 @@ anyhow.workspace = true
 tokio-util.workspace = true
 uuid.workspace = true
 chrono.workspace = true
+[dev-dependencies]
+# token 级源码扫描（结构层断言的底层工具）
+syn.workspace = true
+
 [lints]
 workspace = true
 

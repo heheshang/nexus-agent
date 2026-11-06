@@ -25,6 +25,16 @@ use nexus_core::id::{AgentId, RunId, SessionId};
 use tokio::sync::Barrier;
 use tokio_util::sync::CancellationToken;
 
+// include 共享实现 —— `crates/nexus-core/tests/support/token_scan.rs`
+//
+// ⚠️ 为什么用 `#[path]` 而不是抽一个 crate
+//
+// 抽 crate 会**新增**一条依赖边，而本仓库的依赖方向是**已定稿**条款
+// （架构文档 §6.3 第 5 项）。`#[path]` include 只需要**文件系统**上的相对路径，
+// **不产生任何依赖边** —— `Cargo.toml` 完全不动。
+#[path = "../../nexus-core/tests/support/token_scan.rs"]
+mod token_scan;
+
 // ═══════════════════════════════════════════════════════════
 // 辅助
 // ═══════════════════════════════════════════════════════════
@@ -220,15 +230,19 @@ async fn concurrent_producers_still_yield_a_strictly_monotonic_sequence() {
 fn the_sink_does_not_use_a_mutex() {
     let source = include_str!("../src/events.rs");
 
-    // 去掉注释后再扫描 —— 注释里提到 `Mutex` 是**解释**，不是使用。
-    let stripped = strip_comments(source);
+    // ⚠️ token 级扫描 —— 注释里提到 `Mutex` 是**解释**，不是使用。
+    //
+    // 旧实现用「剥注释后搜文本」，而那份剥注释器**没有字符串状态** ——
+    // `"http://x"` 里的 `//` 会启动行注释，把**该行之后**的真实代码整段丢弃
+    // （那是**真漏报**）。详见 `crates/nexus-core/tests/support/token_scan.rs`。
+    let scanned = token_scan::scan_code(source).expect("解析失败");
 
     assert!(
-        !stripped.contains("Mutex"),
+        !scanned.identifiers.contains("Mutex"),
         "序号分配必须用**单点分配 task**（方案 C），不得用 `Mutex`"
     );
     assert!(
-        !stripped.contains("fetch_add"),
+        !scanned.calls.contains("fetch_add"),
         "方案 A（`fetch_add`）不保证序号与写入的原子性 —— 不得使用"
     );
 
@@ -242,55 +256,17 @@ fn the_sink_does_not_use_a_mutex() {
     //
     // ⚠️ 判据要**足够宽** —— 任何对 `seq` 的**自增或赋值**都算「推进序号」，
     // 不管它叫什么名字、用什么形式写。
-    let increments = stripped
-        .lines()
-        .filter(|line| {
-            let t = line.trim();
-            // `seq += 1` / `seq -= 1` / `seq = ...` / `seq.fetch_add(...)`
-            t.contains("seq += ")
-                || t.contains("seq -= ")
-                || t.contains("seq = ")
-                || t.contains("seq.fetch_add(")
-                || t.contains("seq.fetch_sub(")
-        })
-        .count();
+    //
+    // ⚠️ 用 **AST** 判定而不是「逐行搜文本」——
+    // 逐行搜会**假阳性**（注释里的 `// seq += 1` 被算成一处推进）
+    // 也会**假阴性**（`self.seq += 1` 被漏掉）。
+    let advancements = token_scan::find_advancements(source, "seq").expect("解析失败");
     assert_eq!(
-        increments, 1,
-        "序号必须只在**唯一**的地方推进（单点分配）—— 实得 {increments} 处"
+        advancements.len(),
+        1,
+        "序号必须只在**唯一**的地方推进（单点分配）—— 实得 {} 处：{advancements:?}",
+        advancements.len()
     );
-}
-
-/// 剥离行注释与块注释。
-fn strip_comments(source: &str) -> String {
-    let mut out = String::with_capacity(source.len());
-    let mut chars = source.chars().peekable();
-    let mut in_block = false;
-
-    while let Some(c) = chars.next() {
-        if in_block {
-            if c == '*' && chars.peek() == Some(&'/') {
-                chars.next();
-                in_block = false;
-            }
-            continue;
-        }
-        if c == '/' && chars.peek() == Some(&'/') {
-            for c in chars.by_ref() {
-                if c == '\n' {
-                    out.push('\n');
-                    break;
-                }
-            }
-            continue;
-        }
-        if c == '/' && chars.peek() == Some(&'*') {
-            chars.next();
-            in_block = true;
-            continue;
-        }
-        out.push(c);
-    }
-    out
 }
 
 // ═══════════════════════════════════════════════════════════

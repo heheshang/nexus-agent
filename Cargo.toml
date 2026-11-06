@@ -155,6 +155,9 @@ tokio-test = "0.4.4"
 tempfile = "3.24.0"
 # 负向测试：断言「写错的代码编译不过」（架构文档 §5.2）
 trybuild = "1.0.116"
+# token 级源码扫描（结构层断言的底层工具）——
+# 只作 **dev-dependency** 使用，不进入任何生产依赖边。
+syn = { version = "3.0.9", features = ["full", "visit"] }
 
 # ---- 构建期（集中管理，便于统一升级） ----
 [workspace.lints.rust]

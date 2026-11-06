@@ -19,90 +19,45 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+// include 共享实现 —— `crates/nexus-core/tests/support/token_scan.rs`
+//
+// ⚠️ 为什么用 `#[path]` 而不是抽一个 crate
+//
+// 抽 crate 会**新增**一条依赖边，而本仓库的依赖方向是**已定稿**条款
+// （架构文档 §6.3 第 5 项）。`#[path]` include 只需要**文件系统**上的相对路径，
+// **不产生任何依赖边** —— `Cargo.toml` 完全不动。
+//
+// `nexus-core` 是依赖图的**根**（零内部依赖），
+// 由它**提供**共用代码是最安全的方向。
+#[path = "../../nexus-core/tests/support/token_scan.rs"]
+mod token_scan;
+
 /// 找到 `nexus-api` 的 `src` 目录。
 fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
 }
 
-/// 读一个源码文件，**剥离注释**。
+/// 扫描一个源码文件，返回**标识符**集合。
 ///
-/// # 为什么必须剥离
+/// # 为什么用 token 级扫描而不是「剥注释后搜文本」
 ///
-/// 文档注释里提到 `axum::response::sse` 是**正常的**（说明「为什么不用它」），
-/// 但那不该触发「源码里用了它」的告警。
-fn read_stripped(path: &Path) -> String {
+/// 「剥注释后搜文本」需要自己实现 Rust 的词法 ——
+/// 而 Rust 的词法形态很多（raw string / 字符字面量 / 生命周期 / 嵌套块注释），
+/// 手写必然漏。实测本仓库曾有三份**手抄**的词法器，
+/// 每一份都有各自的失效方式（漏报或假阳性）。
+///
+/// token 级扫描让「注释不是代码」这件事**自动成立** ——
+///
+/// 详见 `crates/nexus-core/tests/support/token_scan.rs` 的模块文档。
+fn scan_identifiers(path: &Path) -> token_scan::ScanResult {
     let raw = fs::read_to_string(path).expect("读取源码失败");
-    strip_comments(&raw)
-}
-
-/// 剥离行注释与块注释。
-fn strip_comments(src: &str) -> String {
-    let mut out = String::with_capacity(src.len());
-    let mut chars = src.chars().peekable();
-    let mut in_block = false;
-    let mut in_string = false;
-    let mut in_char = false;
-
-    while let Some(c) = chars.next() {
-        if in_block {
-            if c == '*' && chars.peek() == Some(&'/') {
-                chars.next();
-                in_block = false;
-            }
-            continue;
-        }
-        if in_string {
-            out.push(c);
-            if c == '\\' {
-                if let Some(next) = chars.next() {
-                    out.push(next);
-                }
-                continue;
-            }
-            if c == '"' {
-                in_string = false;
-            }
-            continue;
-        }
-        if in_char {
-            out.push(c);
-            if c == '\\' {
-                if let Some(next) = chars.next() {
-                    out.push(next);
-                }
-                continue;
-            }
-            if c == '\'' {
-                in_char = false;
-            }
-            continue;
-        }
-        match c {
-            '/' if chars.peek() == Some(&'/') => {
-                // 行注释 —— 跳过到行尾
-                for next in chars.by_ref() {
-                    if next == '\n' {
-                        out.push('\n');
-                        break;
-                    }
-                }
-            }
-            '/' if chars.peek() == Some(&'*') => {
-                chars.next();
-                in_block = true;
-            }
-            '"' => {
-                in_string = true;
-                out.push(c);
-            }
-            '\'' => {
-                in_char = true;
-                out.push(c);
-            }
-            _ => out.push(c),
-        }
-    }
-    out
+    token_scan::scan_code(&raw).unwrap_or_else(|e| {
+        panic!(
+            "解析 {} 失败：{e} —— 解析失败会让扫描结果**不完整**，\
+             那正是「静默失效」的形态（不得静默跳过）",
+            path.display()
+        )
+    })
 }
 
 /// 遍历 `src` 下的所有 `.rs` 文件。
@@ -133,13 +88,14 @@ fn the_api_crate_does_not_use_the_axum_sse_type() {
     //
     // axum 的 `Sse` 会自动转义 `data:` —— 与前端 `lib/sse.ts` 的
     // 字节解析不一致（参考架构 §1.5 已定稿）。
+    //
+    // ⚠️ 判据是**完整路径** `axum::response::sse` —— 不是「`axum` 和 `sse`
+    // 都出现过」（那**太宽松**：本 crate 合法地用了大量 `axum::` 路径）。
     let offenders: Vec<String> = source_files()
         .iter()
         .filter(|p| {
-            let stripped = read_stripped(p);
-            stripped.contains("axum::response::sse")
-                || stripped.contains("response::sse::Sse")
-                || stripped.contains("use axum::response::sse")
+            let scanned = scan_identifiers(p);
+            scanned.paths.contains("axum::response::sse")
         })
         .map(|p| p.display().to_string())
         .collect();
@@ -217,10 +173,10 @@ fn the_api_crate_does_not_implement_jwt_verification() {
     let offenders: Vec<String> = source_files()
         .iter()
         .filter(|p| {
-            let stripped = read_stripped(p);
-            stripped.contains("jsonwebtoken")
-                || stripped.contains("JwtManager")
-                || stripped.contains("decode_header")
+            let scanned = scan_identifiers(p);
+            scanned.identifiers.contains("jsonwebtoken")
+                || scanned.identifiers.contains("JwtManager")
+                || scanned.identifiers.contains("decode_header")
         })
         .map(|p| p.display().to_string())
         .collect();
@@ -247,8 +203,14 @@ fn the_api_crate_does_not_use_the_service_crate() {
     let offenders: Vec<String> = source_files()
         .iter()
         .filter(|p| {
-            let stripped = read_stripped(p);
-            stripped.contains("nexus_service") || stripped.contains("use nexus_service")
+            let scanned = scan_identifiers(p);
+            // ⚠️ 判据是**完整路径** `nexus_service::` ——
+            // 「`nexus_service` 这个词出现过」太宽松
+            // （变量名、注释里的词都会命中）。
+            scanned
+                .paths
+                .iter()
+                .any(|path| path == "nexus_service" || path.starts_with("nexus_service::"))
         })
         .map(|p| p.display().to_string())
         .collect();
@@ -276,10 +238,12 @@ fn the_bridge_does_not_carry_a_heartbeat_timer() {
             if name != "bridge.rs" {
                 return false;
             }
-            let stripped = read_stripped(p);
-            stripped.contains("tokio::time")
-                || stripped.contains("sleep(")
-                || stripped.contains("interval(")
+            let scanned = scan_identifiers(p);
+            // ⚠️ `sleep` / `interval` 按**函数调用**判定 ——
+            // 「源码里出现过 `sleep` 这个词」太宽松。
+            scanned.calls.contains("sleep")
+                || scanned.calls.contains("interval")
+                || scanned.paths.contains("tokio::time")
         })
         .map(|p| p.display().to_string())
         .collect();
