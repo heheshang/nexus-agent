@@ -146,14 +146,24 @@ fi
 # 早先的版本用裸 grep 扫描全文，会把这些说明文字误判成违规 ——
 # 那样写文档反而会让门禁红。
 #
-# 剥离方法：删掉每行 `//` 之后的内容（覆盖 `//`、`///`、`//!` 三种前缀），
-# 再扫描剩下的**真正的代码**。
+# ⚠️ **为什么不能用 `sed -e 's://.*::'`**：
+# `sed` 的替换是**纯文本**的，**不理解字符串** ——
+# 一行里有 `"http://x"` 时，`//` 之后的内容**整行被丢弃**。
+# 结果是「同一行里出现过 `//` 的真实代码完全不进门禁的视野」。
 #
-# 注意：grep 无匹配时返回 1，在 `set -e` 下会中断脚本 —— 必须用 `|| true` 兜住。
+# token 级扫描把源码解析成 AST：注释**根本不是 token**，
+# 字符串字面量是 `LitStr` 节点 —— 「注释不是代码」自动成立。
+#
+# ⚠️ **解析失败必须让门禁红** —— 绝不能把语法错误的文件当成空文件扫
+# （那会让坏掉的源文件悄悄通过门禁 —— 又一次「看起来覆盖了，实际没有」）。
 if [ -d crates/nexus-model/src ]; then
-    hits=$(find crates/nexus-model/src -name '*.rs' -type f -print0 \
-        | xargs -0 sed -e 's://.*::' \
-        | grep -nE 'FromRow|sqlx::|sqlx_macros' 2>/dev/null || true)
+    hits=$(cargo run -q --locked -p nexus-core --example token_scan -- \
+        db-traces crates/nexus-model/src 2>&1) || {
+        echo "  ✗ crates/nexus-model/src：token 级扫描失败 ——"
+        echo "$hits" | sed 's/^/      /'
+        violations=$((violations + 1))
+        hits=""
+    }
     if [ -n "$hits" ]; then
         echo "$hits" | sed 's|^|  ✗ crates/nexus-model/src（代码部分）: |'
         violations=$((violations + 1))

@@ -295,26 +295,14 @@ for dir in "$SPEC_ROOT"/*/; do
     codes_file="$dir/contracts/error-codes.json"
     [ -f "$codes_file" ] || continue
 
-    # 该 Spec 对应的 crate —— 从 invariants.json 的 `crate` 字段读。
+    # 该 Spec 对应的 crate —— 从 invariants.json 的 `crate` / `crates` 字段读。
     # ⚠️ 必须**逐 Spec 判定**，不能用所有白名单的并集 ——
     # 并集会让 P4 的 crate 悄悄用 P3 的码而不被察觉。
     #
-    # ⚠️ `crate` 字段的值是 crate **名**（如 `nexus-agent`），
+    # ⚠️ `crates` 字段的值是 crate **名**（如 `nexus-agent`），
     # 而源码在 `crates/<name>/src`。必须补上前缀 ——
     # 少了这一步，`[ -d "$crate/src" ]` 恒为假，规则会**静默跳过整个 Spec**。
     # 那正是「看起来全绿，实际什么都没拦住」的失效形态。
-    crate_name=$(python3 - "$dir"contracts/invariants.json <<'PY' 2>/dev/null || true
-import json, sys
-try:
-    with open(sys.argv[1]) as fh:
-        print(json.load(fh).get("crate", ""))
-except (OSError, json.JSONDecodeError):
-    pass
-PY
-)
-    [ -n "$crate_name" ] || continue
-    crate="crates/$crate_name"
-    [ -d "$crate/src" ] || continue
 
     # 只取**本 Spec** 的白名单
     own_variants=$(python3 - "$codes_file" <<'PY'
@@ -329,20 +317,71 @@ PY
 )
     [ -n "$own_variants" ] || continue
 
-    # ⚠️ 必须**剥离注释**再扫描 ——
-    # 文档注释里解释「委托给 `nexus-core::ErrorCode::retry_policy()`」
-    # 是正常文字，不是「使用了这个错误码」。
+    # ⚠️ 该 Spec 覆盖的 **crate 列表** —— 从 `invariants.json` 读。
     #
-    # 这与 scripts/check-deps.sh 规则 6b 是同一个坑（那里踩过一次）。
-    used=$(find "$crate/src" -name '*.rs' -type f -print0 \
-        | xargs -0 sed -e 's://.*::' \
-        | grep -ohE 'ErrorCode::[A-Za-z]+' 2>/dev/null \
-        | sed 's/ErrorCode:://' | sort -u || true)
-    for v in $used; do
-        if ! echo "$own_variants" | grep -qx "$v"; then
-            echo "  ✗ ${name}（${crate}）使用了本 Spec 白名单外的错误码：$v"
+    # `crates` 字段接受**字符串或数组**：
+    #   - 字符串（既有写法）→ 单元素数组
+    #   - 数组 → 多个 crate
+    #
+    # ⚠️ **向后兼容**且**不静默跳过** ——
+    # 旧写法（P3 / P4 / P5 三份契约）必须继续工作；
+    # 解析不出来必须**硬失败**，不能当成「没有 crate」（那等于整条规则被跳过）。
+    spec_crates=$(python3 - "$dir"contracts/invariants.json <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    with open(sys.argv[1]) as fh:
+        doc = json.load(fh)
+except (OSError, json.JSONDecodeError):
+    sys.exit(0)
+
+# `crates` 优先；缺省则回退到既有的单值 `crate` 字段。
+value = doc.get("crates", doc.get("crate", ""))
+if isinstance(value, str):
+    value = [value] if value else []
+if not isinstance(value, list):
+    sys.exit(0)
+for crate in value:
+    if isinstance(crate, str) and crate:
+        print(crate)
+PY
+)
+    [ -n "$spec_crates" ] || continue
+
+    for crate_name in $spec_crates; do
+        crate="crates/$crate_name"
+        if [ ! -d "$crate/src" ]; then
+            echo "  ✗ ${name}：契约声明的 crate \`${crate_name}\` 不存在（crates/${crate_name}/src）"
             used_outside=$((used_outside + 1))
+            continue
         fi
+
+        # ⚠️ 必须**token 级**扫描 ——
+        # 文档注释里解释「委托给 `nexus-core::ErrorCode::retry_policy()`」
+        # 是正常文字，不是「使用了这个错误码」。
+        #
+        # ⚠️ **为什么不能用 `sed -e 's://.*::'`**：
+        # `sed` 的替换是**纯文本**的，**不理解字符串** ——
+        # 一行里有 `"http://x"` 时，`//` 之后的内容**整行被丢弃**。
+        # 结果是「同一行里出现过 `//` 的真实代码完全不进门禁的视野」。
+        #
+        # token 级扫描把源码解析成 AST：注释**根本不是 token**，
+        # 字符串字面量是 `LitStr` 节点 —— 「注释不是代码」自动成立。
+        #
+        # ⚠️ **解析失败必须让门禁红** —— 绝不能把语法错误的文件当成空文件扫。
+        used=$(cargo run -q --locked -p nexus-core --example token_scan -- \
+            error-codes "$crate/src" 2>&1) || {
+            echo "  ✗ ${name}（${crate_name}）：token 级扫描失败 ——"
+            echo "$used" | sed 's/^/      /'
+            used_outside=$((used_outside + 1))
+            continue
+        }
+
+        for v in $used; do
+            if ! echo "$own_variants" | grep -qx "$v"; then
+                echo "  ✗ ${name}（${crate_name}）使用了本 Spec 白名单外的错误码：$v"
+                used_outside=$((used_outside + 1))
+            fi
+        done
     done
 done
 if [ "$used_outside" -eq 0 ]; then
