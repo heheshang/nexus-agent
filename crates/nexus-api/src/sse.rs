@@ -152,21 +152,61 @@ pub fn ping() -> Vec<u8> {
 ///
 /// `push` 返回其中所有**完整**的帧；
 /// **不完整的尾部会被缓冲**，等待后续数据。
+///
+/// # ⚠️ 错误态是**类型可见**的事实
+///
+/// 解码器有**两种**状态：
+///
+/// | 状态 | 含义 |
+/// |---|---|
+/// | [`DecoderState::Ready`] | 正常 —— 继续扫描缓冲区 |
+/// | [`DecoderState::Poisoned`] | **已中毒** —— 上游坏了，之后每次 `push` 返回**同一个**错误 |
+///
+/// 中毒有两种成因：**超限**（`FrameTooLarge`）与**畸形帧**（`MalformedFrame`）。
+/// 两者都意味着「**无法重新同步**」—— 不知道下一帧从哪开始，
+/// 所以继续解析只会产出更多垃圾。
+///
+/// # 为什么 `scanned` 必须是**状态的一部分**
+///
+/// 旧实现把 `scanned`（扫描游标）存成**独立于状态**的自由变量，
+/// 于是「游标」与「缓冲区长度」之间**没有不变量** ——
+/// `parse_frame` 失败时 `?` 提前返回，缓冲区已被 `drain` 而游标仍是旧值，
+/// 下一次 `push` 拿旧游标切新缓冲区 → **越界 panic**。
+///
+/// 把游标收进 [`DecoderState::Ready`] 的变体里，
+/// 「游标失效」这件事就**不再可能** ——
+/// 中毒态**根本不存在**游标，调用方也不必知道内部发生过 `drain`。
 #[derive(Debug)]
 pub struct FrameDecoder {
     buf: Vec<u8>,
-    /// 已经扫描过、确认**不含分隔符起点**的字节数。
-    ///
-    /// 逐字节喂入时，若每次都从 0 重扫，退化是 O(n²)。
-    /// 下一次只需从「可能跨次到达的分隔符起点」重扫。
-    scanned: usize,
+    /// 解码器的**状态** —— 正常，还是已中毒。
+    state: DecoderState,
     /// 帧内容的大小上限（字节）—— 不含分隔符。
     limit: usize,
-    /// 上限已触发时的错误 —— 解码器进入**不可恢复**状态。
-    ///
-    /// 一旦超限就**无法重新同步**（不知道下一帧从哪开始），
-    /// 所以后续的 `push` **直接**返回同一个错误，**不再缓冲**。
-    over_limit: Option<FrameError>,
+}
+
+/// 解码器的状态。
+///
+/// # 为什么是**枚举**而不是两个独立字段
+///
+/// 旧实现用 `scanned: usize` + `over_limit: Option<FrameError>` 两个独立字段表达
+/// 「正常 / 已坏」。那种表示允许出现**不可能的状态组合**
+/// （比如 `scanned = 97` 而缓冲区只剩 1 字节 —— 那正是 panic 的成因）。
+///
+/// 枚举让**非法组合不可表示** —— 这是本仓库一贯的手法
+/// （架构文档 §2.1 的取消语义、§2.8 的类型化 ID 都是同一个思路）。
+#[derive(Debug)]
+enum DecoderState {
+    /// 正常 —— `scanned` 是「上次扫过的字节数」。
+    Ready {
+        /// 已经扫描过、确认**不含分隔符起点**的字节数。
+        ///
+        /// 逐字节喂入时，若每次都从 0 重扫，退化是 O(n²)。
+        /// 下一次只需从「可能跨次到达的分隔符起点」重扫。
+        scanned: usize,
+    },
+    /// 已中毒 —— 一旦畸形，后续 `push` 永远返回**同一个**错误。
+    Poisoned(FrameError),
 }
 
 impl Default for FrameDecoder {
@@ -177,9 +217,8 @@ impl Default for FrameDecoder {
     fn default() -> Self {
         Self {
             buf: Vec::new(),
-            scanned: 0,
+            state: DecoderState::Ready { scanned: 0 },
             limit: MAX_FRAME_BYTES,
-            over_limit: None,
         }
     }
 }
@@ -223,14 +262,19 @@ impl FrameDecoder {
     /// 这是刻意的：畸形帧说明**上游已经坏了**，
     /// 继续读只会产出更多垃圾。调用方应当**终止**这条流。
     ///
-    /// # ⚠️ 超限后解码器进入**不可恢复**状态
+    /// # ⚠️ 畸形帧或超限后，解码器进入**不可恢复**状态
     ///
-    /// 超限时无法知道下一帧的边界在哪（分隔符还没出现）——
-    /// **无法重新同步**。所以解码器**释放缓冲区**并记住该错误，
-    /// 之后每次 `push` 都**直接**返回同一个错误。
+    /// 两种成因都意味着「**无法重新同步**」：
+    ///
+    /// - **超限**：帧的边界还没出现（分隔符没到）。
+    /// - **畸形帧**：帧内容**已经被切走**，游标随之失效。
+    ///
+    /// 所以解码器**记住该错误**，之后每次 `push` 都**直接**返回
+    /// **同一个**错误（幂等），**不再缓冲**。
     ///
     /// 这不是「保守」—— 这是**唯一正确**的行为：
-    /// 若继续缓冲，攻击者只要持续发送无分隔符字节就能**再次**撑爆内存。
+    /// 若继续缓冲，攻击者只要持续发送无分隔符字节就能**再次**撑爆内存；
+    /// 若继续解析畸形流，产出的只会是更多垃圾帧。
     ///
     /// # ⚠️ 上限约束的是**保留量**，不是**瞬时峰值**
     ///
@@ -243,8 +287,10 @@ impl FrameDecoder {
     /// 上限防的是「**跨多次 push 累积**」——那才是无界的。
     /// 逐字节/小块喂入时峰值就是 `limit` 本身。
     pub fn push(&mut self, chunk: &[u8]) -> Result<Vec<Frame>, FrameError> {
-        // ⚠️ **先**检查是否已超限 —— 已超限时**不再复制**任何字节进来。
-        if let Some(err) = &self.over_limit {
+        // ⚠️ **先**检查是否已中毒 —— 已中毒时**不再复制**任何字节进来。
+        //
+        // 这里返回的是**同一个**错误（幂等）—— 中毒态**记住**了首次的错误。
+        if let DecoderState::Poisoned(err) = &self.state {
             return Err(err.clone());
         }
 
@@ -253,7 +299,14 @@ impl FrameDecoder {
         let mut frames = Vec::new();
         // 只从「上次没扫过」的位置开始找 —— 否则逐字节喂入时
         // 每次都要重扫整个缓冲，退化为 O(n²)。
-        let mut scan_from = self.scanned;
+        //
+        // ⚠️ 这里**必须**从状态里取游标 —— 游标是**状态的一部分**，
+        // 不是独立于状态的自由变量（见 [`DecoderState`] 的文档）。
+        let mut scan_from = match self.state {
+            DecoderState::Ready { scanned } => scanned,
+            // 上面的早返回已经处理了 Poisoned；这里只是让类型检查器满意。
+            DecoderState::Poisoned(_) => unreachable!("中毒态已在早返回处处理"),
+        };
 
         loop {
             let Some((pos, delim_len)) = find_delimiter(&self.buf[scan_from..]) else {
@@ -265,10 +318,12 @@ impl FrameDecoder {
                 }
                 // 下次只需回退「可能跨次到达的最长分隔符」长度 - 1。
                 // 最长的是 CRLF（4 字节），回退 3 字节即可覆盖跨界起点。
-                self.scanned = self
-                    .buf
-                    .len()
-                    .saturating_sub(FRAME_DELIMITER_CRLF.len() - 1);
+                self.state = DecoderState::Ready {
+                    scanned: self
+                        .buf
+                        .len()
+                        .saturating_sub(FRAME_DELIMITER_CRLF.len() - 1),
+                };
                 return Ok(frames);
             };
             let pos = scan_from + pos;
@@ -293,10 +348,28 @@ impl FrameDecoder {
             scan_from = 0;
 
             // 纯注释帧（心跳）被**跳过** —— 不是错误。
-            let Some(frame) = parse_frame(&raw)? else {
-                continue;
-            };
-            frames.push(frame);
+            //
+            // ⚠️ **畸形帧会让解码器进入中毒态**。
+            //
+            // 畸形帧说明**上游已经坏了** —— 继续读只会产出更多垃圾。
+            // 而此时缓冲区**已经被 drain**（畸形帧的内容已切走），
+            // 继续扫描会拿着**失效的游标**去切新的缓冲区 → 越界。
+            //
+            // 所以这里**不**用 `?` 提前返回，而是**显式**把解码器置为中毒：
+            // 状态转换与「缓冲区已被改动」这两件事**同时**发生、**原子**可见。
+            match parse_frame(&raw) {
+                // 纯注释帧（心跳）—— 合法，继续。
+                Ok(None) => continue,
+                Ok(Some(frame)) => frames.push(frame),
+                Err(err) => {
+                    // ⚠️ **畸形帧** —— 解码器**不可恢复**：
+                    // 缓冲区已被 drain，游标已失效，无法重新同步。
+                    //
+                    // 记录错误并**释放缓冲区**（上游字节是**不可信输入**，
+                    // 保留它既没用又占着内存 —— 与超限路径同理）。
+                    return Err(self.poisoned(err));
+                }
+            }
         }
     }
     /// 当前缓冲的**半帧**字节数。
@@ -322,12 +395,37 @@ impl FrameDecoder {
             limit: self.limit,
             actual,
         };
-        self.over_limit = Some(err.clone());
+        self.state = DecoderState::Poisoned(err.clone());
         // ⚠️ `Vec::new()` 而**不是** `clear()` ——
         // `clear()` 保留**容量**（那 1 MiB 还在），
         // 而解码器已经不会复用这块内存了。
         self.buf = Vec::new();
-        self.scanned = 0;
+        err
+    }
+
+    /// 记录畸形帧并**释放**缓冲区，使解码器进入**中毒态**。
+    ///
+    /// # 为什么畸形帧也要中毒
+    ///
+    /// 畸形帧意味着「**上游已经坏了**」—— 现有文档已写明
+    /// 「调用方应当**终止**这条流」。
+    ///
+    /// 更要紧的是**技术上不可恢复**：畸形帧的内容**已经被 drain 走**，
+    /// 游标随之失效 —— 继续扫描会拿着失效的游标切新的缓冲区 → 越界。
+    ///
+    /// 所以中毒**不**是「保守」，而是**唯一正确**的行为。
+    ///
+    /// # 为什么复用 `FrameError` 而不新增变体
+    ///
+    /// `FrameError` 是 `pub` 契约（`lib.rs` 有 re-export）——
+    /// 新增变体是**破坏性变更**，需要前后端同步（架构文档 §6.3 第 3 项）。
+    /// 而「畸形帧」这个语义**已经**由 `MalformedFrame` 表达，
+    /// 新增变体**不增加信息**。
+    fn poisoned(&mut self, err: FrameError) -> FrameError {
+        self.state = DecoderState::Poisoned(err.clone());
+        // ⚠️ 同样**释放**缓冲区 ——
+        // 上游字节是**不可信输入**，且解码器已不可恢复（与超限路径同理）。
+        self.buf = Vec::new();
         err
     }
 }
@@ -847,5 +945,132 @@ mod tests {
             },
             "应报告**超大帧**自己的长度（正常帧不应被牵连）"
         );
+    }
+
+    // ── 畸形帧后的状态转换（NEX-47） ──
+
+    #[test]
+    fn the_decoder_does_not_panic_after_a_malformed_frame() {
+        // ⚠️ **复现序列** —— 旧实现在第 ③ 步 panic：
+        //   range start index 97 out of range for slice of length 1
+        //
+        // 机制：`push` 用 `scanned` 缓存「上次扫过的字节数」。
+        // 第 ① 步喂 100 字节无分隔符 → `scanned = 97`。
+        // 第 ② 步喂畸形帧 → `parse_frame` 失败时 `?` **提前返回**，
+        // 而缓冲区**已经被 drain** 到只剩 1 字节 —— `scanned` 仍是 97。
+        // 第 ③ 步 → `&self.buf[97..]` **越界** → panic。
+        //
+        // 这条抓的是**状态转换缺口**，不是输入空间缺口 ——
+        // 补再多畸形输入也测不出来，除非测「拒绝之后**继续喂**」。
+        let mut d = FrameDecoder::new();
+
+        // ① 无分隔符 → 缓冲起来，游标前进到「可能跨次到达的分隔符起点」
+        d.push(&[b'x'; 100]).unwrap();
+
+        // ② 畸形帧（既无 event 又无 data）→ 拒绝
+        let err = d.push(b"ab\n\n").unwrap_err();
+        assert_eq!(err, FrameError::MalformedFrame);
+
+        // ③ **继续喂** —— 旧实现在这里 panic
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| d.push(b"z")));
+        assert!(
+            r.is_ok(),
+            "畸形帧之后继续喂**不得 panic** —— 解码器必须进入显式错误态"
+        );
+        assert_eq!(
+            r.unwrap().unwrap_err(),
+            FrameError::MalformedFrame,
+            "第 ③ 步应返回错误，而不是 panic"
+        );
+    }
+
+    #[test]
+    fn the_decoder_stays_broken_after_a_malformed_frame() {
+        // 畸形帧之后解码器**不可恢复** —— 后续 push 返回**同一个**错误。
+        //
+        // ⚠️ 必须断言**错误内容相同**，不只是「也报错」——
+        // 只断言「报错」的话，一个「每次重新解析并报一个新错误」的实现也能过。
+        let mut d = FrameDecoder::new();
+
+        d.push(&[b'x'; 100]).unwrap();
+        let first = d.push(b"ab\n\n").unwrap_err();
+        assert_eq!(first, FrameError::MalformedFrame);
+
+        // 喂一个**合法**的小帧 —— 若解码器已复位，它会**成功**解码
+        // （返回 `Ok`），而不是报错。
+        let second = d.push(b"event: delta\ndata: {}\n\n").unwrap_err();
+        assert_eq!(first, second, "畸形帧后应返回**同一个**错误（幂等）");
+
+        // 再喂一次 —— 错误**不得**变化
+        let third = d.push(b"event: delta\ndata: {}\n\n").unwrap_err();
+        assert_eq!(first, third, "错误应保持幂等");
+    }
+
+    #[test]
+    fn the_buffer_stops_growing_after_a_malformed_frame() {
+        // 畸形帧之后**不再缓冲** —— 与超限路径同理。
+        //
+        // ⚠️ 这条抓的是「畸形后清空缓冲、继续正常解析」的错误实现 ——
+        // 那会让上游的垃圾数据持续占用内存。
+        let mut d = FrameDecoder::new();
+
+        d.push(&[b'x'; 100]).unwrap();
+        assert!(d.push(b"ab\n\n").is_err());
+
+        let after = d.buffered();
+        for _ in 0..10 {
+            assert!(d.push(&[b'y'; 100]).is_err());
+            assert_eq!(d.buffered(), after, "畸形帧后缓冲区不得继续增长");
+        }
+    }
+
+    #[test]
+    fn the_decoder_releases_its_buffer_after_a_malformed_frame() {
+        // ⚠️ 断言的是**容量**，不只是**长度**。
+        //
+        // 与超限路径同理：`clear()` 只把长度归零 —— **容量**还在。
+        // 解码器已经**不可恢复**，这块内存**不会被复用** → 必须真正释放。
+        let mut d = FrameDecoder::new();
+
+        d.push(&[b'x'; 100]).unwrap();
+        assert!(d.push(b"ab\n\n").is_err());
+
+        assert_eq!(d.buffered(), 0, "畸形帧后缓冲区长度应归零");
+        assert_eq!(
+            d.buf.capacity(),
+            0,
+            "畸形帧后应**释放**容量（clear() 只归零长度，容量仍占着内存）"
+        );
+    }
+
+    #[test]
+    fn a_heartbeat_frame_does_not_poison_the_decoder() {
+        // ⚠️ **心跳是合法的** —— 纯注释帧既无 event 也无 data，
+        // 但它**不是**畸形帧（那是 P5 已验证的行为）。
+        //
+        // 这条抓的是「把所有「既无 event 又无 data」的帧都判成畸形」的错误实现 ——
+        // 那会让每隔一次心跳就中断整条流。
+        let mut d = FrameDecoder::new();
+
+        // 心跳 → 跳过，不产出帧，**不**中毒
+        assert!(d.push(&ping()).unwrap().is_empty());
+
+        // 后续仍然是**正常**的 —— 能继续解码
+        let frames = d.push(b"event: delta\ndata: {}\n\n").unwrap();
+        assert_eq!(frames.len(), 1, "心跳之后应能继续正常解码");
+        assert_eq!(frames[0].event, "delta");
+    }
+
+    #[test]
+    fn a_valid_frame_after_a_normal_one_is_unaffected() {
+        // **回归保护**：正常路径**完全不受**状态机改造影响。
+        let mut d = FrameDecoder::new();
+        let mut buf = Vec::new();
+        for i in 0..5 {
+            buf.extend(encode_frame("delta", &json!({"i": i})));
+        }
+        let frames = d.push(&buf).unwrap();
+        assert_eq!(frames.len(), 5);
+        assert_eq!(d.buffered(), 0);
     }
 }
