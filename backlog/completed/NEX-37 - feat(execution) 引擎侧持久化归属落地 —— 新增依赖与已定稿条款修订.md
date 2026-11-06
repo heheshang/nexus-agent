@@ -1,7 +1,7 @@
 ---
 id: NEX-37
 title: "feat(execution): 引擎侧持久化归属落地（新增依赖 + 修订已定稿条款）"
-status: In Progress
+status: Done
 assignee: []
 labels: [execution, crate-boundary, contract-revision]
 priority: high

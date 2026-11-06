@@ -111,7 +111,7 @@ references:
 
 ### #7 无隐形依赖
 
-- 前置：NEX-37（引擎侧持久化归属落地，已登记于 `backlog/tasks/NEX-37 - ....md`）
+- 前置：NEX-37（引擎侧持久化归属落地，已登记于 `backlog/completed/NEX-37 - ....md`）
 - 图编译与节点执行属 NEX-38 / NEX-39 —— driver 以 **trait 接缝**调用它们，
   **不依赖**其具体实现细节（与 P5 的决策 D10 同一条纪律）
 - 集成测试需要真实 PostgreSQL 17 —— P2 的基座**已存在**（NEX-14）

@@ -103,7 +103,7 @@ references:
 
 ### #7 无隐形依赖
 
-- 前置：NEX-37（引擎侧持久化归属落地，已登记于 `backlog/tasks/NEX-37 - ....md`）
+- 前置：NEX-37（引擎侧持久化归属落地，已登记于 `backlog/completed/NEX-37 - ....md`）
 - `execution_checkpoints` 表**已由 NEX-9 建立**（迁移 5）—— 不需要新迁移
 - 负载上限的 CHECK 约束**已在数据库里** —— 应用层不重复实现
 - 集成测试需要真实 PostgreSQL 17 —— P2 的基座**已存在**（NEX-14）

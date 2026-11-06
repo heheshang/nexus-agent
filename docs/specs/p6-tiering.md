@@ -132,7 +132,7 @@ P6 **明显**能拆成多个可独立评审的任务：
 | **决策** | 本轮产出**分层判定 + Spec 三件套 + backlog 任务清单 + 门禁全绿**；**不写任何实现代码**、不 commit、不 push、不开 PR |
 | **依据** | 操作者 2026-11-06 的明确指令；且 P6 触及 crate 边界与定稿条款，需要操作者先看到范围与判定 |
 | **可逆性** | 高 —— 产出物全是文档，可直接修改 |
-| **影响面** | `docs/specs/p6*`、`backlog/tasks/NEX-37..46`、`docs/specs/README.md`、`docs/README.md` |
+| **影响面** | `docs/specs/p6*`、`backlog/tasks/NEX-37..46`（NEX-37 完成后归档至 `backlog/completed/`）、`docs/specs/README.md`、`docs/README.md` |
 
 ### 决策 OP-B —— P6 沿用 **P5 的产出物形态**（Tier 2 三件套 + 契约）
 
