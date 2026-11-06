@@ -1930,6 +1930,66 @@ Rust 的测试可以验证「某段代码**不能**编译」：
 | **先固化错误再取消** | 供应商失败**原样**保留，不被 `cancel` 覆盖成「用户取消」 | ✅ 已验证（NEX-29 `a_provider_failure_is_not_masked_by_cancellation`） |
 | 工具输出**超长被截断** | 截断保持 **UTF-8 边界**，且带截断标记 | ✅ 已验证（NEX-29 `a_huge_tool_output_is_truncated` + `the_truncation_respects_utf8_boundaries`） |
 | 裁剪**每步**重跑 | 第二步在**构造请求**时就超预算 —— 证明裁剪不是只在第一步跑 | ✅ 已验证（NEX-29 `the_second_step_sees_a_compacted_history`） |
+| SSE **半帧被缓冲**而非丢弃 | 喂入不完整帧不产出帧，缓冲字节数 > 0 | ✅ 已验证（NEX-31 `a_partial_frame_is_buffered_not_emitted`） |
+| SSE **逐字节喂入**不丢帧 | 一帧被切成 N 片喂入，最终得到完整的一帧 | ✅ 已验证（NEX-31 `a_byte_by_byte_feed_reassembles_the_frame`） |
+| SSE **任意切分点**都正确重组 | 在帧的每一个字节位置切断，两次喂入后结果相同 | ✅ 已验证（NEX-31 `every_split_point_reassembles_identically`） |
+| SSE **分隔符不残留** | 连续多帧解码后缓冲区清空（防死循环回归） | ✅ 已验证（NEX-31 `consecutive_frames_leave_the_buffer_empty`） |
+| SSE 帧格式**逐字节对齐** | 编码结果等于**字面量**期望串，不是 round-trip 断言 | ✅ 已验证（NEX-31 `the_encoded_frame_matches_the_reference_bytes`） |
+| SSE **畸形帧被拒绝** | 空帧、既无 event 又无 data 的帧返回错误 | ✅ 已验证（NEX-31 `a_malformed_frame_is_rejected`） |
+| SSE **CRLF 变体**被容忍 | `\r\n\r\n` 分隔的帧也能正确解码 | ✅ 已验证（NEX-31 `a_crlf_variant_is_accepted`） |
+| SSE **心跳注释行**被忽略 | 注释不产生帧（否则每隔一次心跳就中断整条流） | ✅ 已验证（NEX-31 `a_comment_line_is_ignored`） |
+| SSE **全部 12 个事件名**映射正确 | 不是抽查 —— 逐条比对 `nexus_core::EVENT_NAMES` | ✅ 已验证（NEX-32 `all_twelve_event_names_map_correctly`） |
+| SSE **手写字节输出** | 源码不含 axum 的 `Sse` 类型（决策 D8） | ✅ 已验证（NEX-32 `the_api_crate_does_not_use_the_axum_sse_type`） |
+| SSE 桥接**每帧可被解回** | 输出符合帧格式 | ✅ 已验证（NEX-32 `every_frame_the_bridge_writes_can_be_decoded_back`） |
+| SSE **流结束不补额外帧** | 事件流结束即流结束 | ✅ 已验证（NEX-32 `the_stream_ends_without_extra_frames`） |
+| SSE **流出错发 error 帧**且不含 cause | 帧里只有码值与文案 | ✅ 已验证（NEX-32 `a_stream_error_becomes_an_error_frame` + `the_error_frame_carries_no_internal_cause`） |
+| SSE **客户端断开触发取消** | 断开 = 取消（参考架构 §2.1 的取消语义） | ✅ 已验证（NEX-32 `a_client_disconnect_cancels_the_run`） |
+| 成功响应 `code` 是**数字 0**，失败是**业务码** | 逐条断言数值 | ✅ 已验证（NEX-33 `a_success_response_carries_the_numeric_zero_code` + `a_failure_response_carries_the_business_code`） |
+| 响应体**不含内部原因** | 只有 code 与 message | ✅ 已验证（NEX-33 `the_response_body_carries_no_internal_cause`） |
+| HTTP 状态码与业务码**一致** | 7 个白名单码逐条核对 | ✅ 已验证（NEX-33 `the_http_status_matches_the_business_code`） |
+| `data` 缺省时**省略**该字段 | 不输出 `"data": null` | ✅ 已验证（NEX-33 `an_absent_data_field_is_omitted`） |
+| 序列化失败**仍有合法 JSON body** | 兜底不是空 body —— 且断言的是**生产代码用的那一份** | ✅ 已验证（NEX-33 `the_fallback_body_is_still_valid_json` + `the_production_fallback_is_the_one_under_test`） |
+| 鉴权提取失败**返回 401/403** + 统一响应包 | 失败与成功两条路径都验证 | ✅ 已验证（NEX-34 `a_failed_identity_extraction_is_rejected` + `the_rejection_uses_the_unified_response_shape`） |
+| 鉴权成功后**身份进入 Extension** | handler 可取用 | ✅ 已验证（NEX-34 `the_identity_reaches_the_handler` + `the_sse_endpoint_receives_the_authenticated_identity`） |
+| `nexus-api` **不自行实现 JWT 校验** | 策略由上层经 trait 注入（决策 D10） | ✅ 已验证（NEX-34 `the_api_crate_does_not_implement_jwt_verification`） |
+| 路由**可增量注册** | 后注册的路由不影响先注册的 | ✅ 已验证（NEX-34 `the_router_builder_registers_routes_incrementally`） |
+| **心跳在路由层**注入，桥接不自带定时器 | 空闲连接写出 `: ping\n\n`；结构层断言桥接无 `tokio::time` | ✅ 已验证（NEX-34 `the_heartbeat_is_written_on_an_idle_connection` + `the_bridge_does_not_carry_a_heartbeat_timer`） |
+| 请求 ID **分配或透传** | 放进请求 Extension 与响应头 `x-request-id` | ✅ 已验证（NEX-34 `a_request_id_is_generated_when_none_is_inbound` + `an_inbound_request_id_is_passed_through`） |
+| `nexus-api` **不引用** `nexus-service` 具体类型 | 只依赖 trait 接缝（决策 D9） | ✅ 已验证（NEX-34 `the_api_crate_does_not_use_the_service_crate`） |
+| SSE 端点**真实可跑** | 数据源是注入的 trait，端到端产出完整 SSE 帧流 | ✅ 已验证（NEX-34 `the_sse_demo_endpoint_is_reachable_and_streams_frames`） |
+| SSE 帧内容**有大小上限**（1 MiB） | 超限返回 `FrameTooLarge`，不 panic、不静默截断 | ✅ 已验证（NEX-35 `an_oversized_frame_is_rejected_without_panicking`） |
+| 超限后**缓冲区不再增长** | 释放缓冲并记住错误，后续 `push` 直接返回该错误 | ✅ 已验证（NEX-35 `the_buffer_stops_growing_after_the_limit_is_exceeded` + `the_decoder_releases_its_buffer_after_exceeding_the_limit`） |
+| 帧大小的**双向边界** | 恰好等于上限通过，超出 1 字节拒绝；上限**不含**分隔符 | ✅ 已验证（NEX-35 `a_frame_exactly_at_the_limit_is_decoded` + `the_limit_counts_frame_content_not_the_delimiter`） |
+| 帧上限对 **LF 与 CRLF** 都生效，且**按单帧**计 | 一次喂入含多个帧时不误杀 | ✅ 已验证（NEX-35 `the_limit_applies_to_the_crlf_delimiter_variant` + `the_limit_is_applied_per_frame_not_per_chunk`） |
+| `FrameTooLarge` 的 `Display` **不含缓冲内容** | 上游负载不进入日志或响应 | ✅ 已验证（NEX-35 `the_too_large_error_carries_no_buffered_content`） |
+
+> **落地记录（2026-11-06，P5 完成）**：上表的 P5 各行由 `nexus-api` 承担，
+> 契约载体是 `docs/specs/p5/contracts/invariants.json`（**37 条**不变量，
+> 逐条指向**真实存在的测试名**）——
+> `scripts/check-specs.sh` 规则 3 校验「契约引用的测试真的存在」，
+> 规则 3b 校验「已完成的 Spec 不得残留 `planned`」。
+>
+> P5 的完成判据「**SSE 半帧处理有测试**」由 NEX-31 承担、
+> NEX-36 确认它**真的成立**（而非被跳过）——
+> `crates/nexus-api/src/sse.rs` 的 34 个单元测试里，
+> 逐字节喂入与**任意切分点**两条是**逐位置**验证（不是抽查几处）。
+>
+> 行为层的断言经过了**注入故障**验证（变异测试确认会红）——
+> P5 覆盖四类**静默失效**形态：帧格式错、分隔符残留、事件名映射错、cause 泄露。
+>
+> P5 的一条教训：**契约引用的路径也会漂移**——
+> P5-I20 的 `verified_by` 指向 `tests/response.rs`，
+> 而那个测试实际在 `src/response.rs`。
+> 它之所以**一直没被发现**，是因为规则 3 只校验 `status == verified` 的条目，
+> 而它还**停在 `planned`**。
+> ⇒ 规则 3b（任务全部归档后不得残留 `planned`）是**这条漂移的唯一防线**。
+> 收口时必须**先把全部升格**再跑门禁 —— 否则漂移会**借 `planned` 藏身**。
+>
+> 另一条教训：**「测试存在」不等于「断言有效」**——
+> P5-I20 的测试原本断言的是**测试自己写的那份字面量**，
+> 而不是生产代码里的兜底串（同义反复）。
+> 收口时把兜底串提成**具名常量** `FALLBACK_BODY`，
+> 并补一条**元断言**（`to_bytes` 用的确实是那一份常量）。
 
 > **落地记录（2026-11-05，P4 完成）**：上表的 P4 各行由 `nexus-agent` 承担，
 > 契约载体是 `docs/specs/p4/contracts/invariants.json`（**25 条**不变量，
@@ -2071,7 +2131,7 @@ cd <nexus-agent>/examples && cargo run -p demo-lease-fencing
 | **P2 基础设施** | `nexus-infra`（PG/Redis/S3/Milvus）、`nexus-repo` | 迁移可应用、集成测试绿 | ✅ 完成（NEX-8..14；19 张 Phase 0 表在**空库**上可应用且可重复执行，50 个集成测试在 PostgreSQL 17 上全绿，CI 有 PG `services:` 且**真跑**集成测试） |
 | **P3 LLM 网关** | `nexus-llm`：供应商、预算、重试、熔断 | 预算裁剪与回退边界有测试 | ✅ 完成（NEX-16..19；9 个协议类型 + 预算裁剪 + 重试退避 + 熔断 + OpenAI 兼容客户端 + 网关回退边界，88 个测试；**熔断是单副本粒度** —— 见 §4.3） |
 | **P4 Agent 运行时** | `nexus-agent`：ReAct、上下文预算 | ReAct 循环有测试 | ✅ 完成（NEX-26..30；**trait 边界**（`ChatModel` 泛型 + `InvokableTool` dyn）+ **协议完整性校验**（配对先于裁剪）+ **整轮淘汰**（不生成摘要）+ **事件 sink**（单点分配序号 + 必达/可丢双通道 + 背压主动取消）+ **ReAct 循环**（三个安全阀 + 工具结果结构化回灌 + 并发限流 + UTF-8 安全截断），65 个测试；契约载体 `docs/specs/p4/contracts/invariants.json`（25 条不变量**全部 verified**）） |
-| **P5 协议层** | `nexus-api`：REST + SSE | SSE 半帧处理有测试 | ⬜ |
+| **P5 协议层** | `nexus-api`：REST + SSE | SSE 半帧处理有测试 | ✅ 完成（NEX-25、31..35；**SSE 帧编解码**（逐字节对齐 + 半帧缓冲 + 帧大小上限 1 MiB）+ **事件名映射**（12 个全量映射）+ **SSE 桥接**（手写 `Body::from_stream` + 断开即取消）+ **统一响应包**（成功 `code == 0`）+ **协议层中间件**（鉴权 trait 接缝 + 请求 ID）+ **路由骨架**（可增量注册 + 路由层心跳），98 个测试；契约载体 `docs/specs/p5/contracts/invariants.json`（**37 条**不变量**全部 verified**）） |
 | **P6 工作流** | `nexus-workflow` + `nexus-execution` | 租约、fencing、审批恢复有测试 | ⬜ |
 | **P7 知识与记忆** | `nexus-rag`、`nexus-memory` | 混合检索降级路径有测试 | ⬜ |
 | **P8 工具与协议** | `nexus-tool`、`nexus-mcp`（出站）、`nexus-a2a`（双向） | 危险工具授权边界有测试 | ⬜ |
@@ -2139,6 +2199,41 @@ P3 的完成判据「**预算裁剪与回退边界有测试**」由 NEX-17 与 N
 
 与 P1 / P2 同样的防伪纪律：**契约引用的测试必须真的存在**
 （`scripts/check-specs.sh` 规则 3），且关键断言经过**变异测试**验证会红。
+
+## 6.2.4 P5 的具体任务
+
+| 任务 | 产出 | 契约依据 |
+|---|---|---|
+| NEX-25 | `GET /metrics` 端点（Prometheus 文本格式） | §5.6 |
+| NEX-31 | SSE 帧编解码器 + **半帧缓冲** | 参考架构 §1.5、§5.4 |
+| NEX-32 | 12 个事件名映射 + SSE 桥接（手写 `Body::from_stream` + 断开即取消） | §2.2.4.1、参考架构 §1.5 |
+| NEX-33 | 统一响应包 + 协议层错误兜底 | §2.6.3、§2.6.5 |
+| NEX-34 | 协议层中间件（鉴权 trait 接缝 + 请求 ID）+ 路由骨架 + 路由层心跳 | §2.6.5、参考架构 §2.1 |
+| NEX-35 | SSE 解码器**帧大小上限**（加固） | §5.4 |
+| NEX-36 | 收口：架构文档同步 + 契约升格 + 故障注入 | §5.2、§5.3、§5.4、§6.1 |
+
+P5 的完成判据「**SSE 半帧处理有测试**」由 NEX-31 承担、NEX-36 确认它
+**真的成立**（而非被跳过）——「半帧缓冲」拆成**七条**可验证子目标
+（`docs/specs/p5/spec.md` §5），其中「逐字节喂入」与「任意切分点」
+是**逐位置**验证，不是抽查几处。
+
+P5 的三条**传输层边界**决策（Spec §6）：
+
+| 编号 | 决策 | 一句话 |
+|---|---|---|
+| D8 | SSE 输出**手写** `Body::from_stream` | 不用 axum 的 `Sse`（它会转义 `data:`，与前端字节解析不一致） |
+| D9 | P5 交付**传输层能力** | 用 trait 接缝连接上层，不做业务编排 |
+| D10 | 鉴权的**机制**在 P5、**策略**在上层 | `nexus-api` 不自行实现 JWT 校验 |
+
+D9 的**落地证据**是「P5 **必须交付一个真实的端点**」——
+所以 NEX-34 交付了一个**注入式**的示范 SSE 端点（数据源是 trait，
+用本地 mock 就能看到完整 SSE 帧流），骨架部分（可增量注册的
+`Router` 构建器）是基础设施而非交付物本身。
+
+与 P1 / P2 / P3 / P4 同样的防伪纪律：
+**契约引用的测试必须真的存在**（`scripts/check-specs.sh` 规则 3），
+规则 3b 校验「已完成的 Spec 不得残留 `planned`」，
+关键断言经过**变异测试**验证会红。
 
 ## 6.3 设计定稿的门槛
 

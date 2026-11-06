@@ -113,12 +113,21 @@ impl Frame {
 ///
 /// 输出格式：`event: {name}\ndata: {json}\n\n`
 ///
-/// # 为什么**不用** `serde_json::to_string`
+/// # 为什么**不用** `serde_json::to_string_pretty`
 ///
-/// `to_string` 会转义 `/` 之外的某些字符，且**不保证**键序。
+/// `to_string_pretty` 会**美化换行** —— 输出变成
+/// `{\n  "content": "hi"\n}`，跨行。
 /// SSE 帧的 `data:` 内容必须能被前端原样 `JSON.parse` ——
 ///
-/// 用 `to_vec`（紧凑形式）比 `to_string`（可能带换行美化）更可控。
+/// 用 `to_vec`（紧凑形式）比美化形式**更可控**。
+///
+/// # ⚠️ `to_string` 与 `to_vec` **等价**
+///
+/// `serde_json::to_string` 与 `to_vec` 产出**完全相同**的字节
+/// （前者只是后者的 `String` 版本）。
+/// ⇒ 要改变字节**必须**用 `to_string_pretty`。
+/// （NEX-36 收口时的故障注入证实：把 `to_vec` 换成 `to_string`，
+/// 帧字节**一个都没变**，测试**不会**变红。）
 pub fn encode_frame(event: &str, data: &Value) -> Vec<u8> {
     // `serde_json::Value` 的序列化在实践中不可失败（键必为字符串）。
     // 仍然不 panic —— 服务器进程里一个 `expect` 就是一次可用性事故。

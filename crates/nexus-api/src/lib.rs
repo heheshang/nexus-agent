@@ -52,7 +52,7 @@ pub use middleware::{
     AuthenticatedIdentity, IdentityExtractor, REQUEST_ID_HEADER, RequestId, RequestIdExtractor,
     identity_middleware, request_id_middleware,
 };
-pub use response::{ApiResponse, SUCCESS_CODE, SUCCESS_MESSAGE};
+pub use response::{ApiResponse, FALLBACK_BODY, SUCCESS_CODE, SUCCESS_MESSAGE};
 pub use router::{DEFAULT_HEARTBEAT_INTERVAL, EventStreamProvider, RouterBuilder, SSE_DEMO_PATH};
 pub use sse::{Frame, FrameDecoder, FrameError, MAX_FRAME_BYTES, encode_frame, ping};
 

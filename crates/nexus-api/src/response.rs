@@ -49,6 +49,22 @@ pub const SUCCESS_CODE: i32 = 0;
 /// 成功响应的默认文案。
 pub const SUCCESS_MESSAGE: &str = "ok";
 
+/// 序列化失败时的**兜底 body**。
+///
+/// # 为什么要**具名**
+///
+/// 兜底字符串原先是 `to_bytes` 里的**内联字面量** ——
+/// 那意味着「兜底 body 是不是合法 JSON」**无法被测试**：
+/// 内联字面量只能靠**源码扫描**或**复制粘贴**来断言，
+/// 而后者是**同义反复**（断言的是测试自己写的那份副本）。
+///
+/// 提成具名常量后，测试**直接断言生产代码用的那一份** ——
+/// 兜底被改坏时测试**真的会红**。
+///
+/// ⚠️ 兜底消息是中文 —— **不能**用字节串字面量 `br#"..."#`
+/// （字节串字面量必须全是 ASCII）。
+pub const FALLBACK_BODY: &str = r#"{"code":90001,"message":"系统内部错误"}"#;
+
 /// 统一响应包。
 ///
 /// # `data` 的序列化
@@ -127,8 +143,7 @@ impl ApiResponse {
     /// ⚠️ 不能用 `br#"..."#` —— 字节串字面量**必须**是 ASCII，
     /// 而兜底消息是中文。
     pub fn to_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self)
-            .unwrap_or_else(|_| r#"{"code":90001,"message":"系统内部错误"}"#.as_bytes().to_vec())
+        serde_json::to_vec(self).unwrap_or_else(|_| FALLBACK_BODY.as_bytes().to_vec())
     }
 }
 
@@ -209,8 +224,55 @@ mod tests {
     fn the_fallback_body_is_still_valid_json() {
         // 兜底路径不能被构造出来（字段都是平凡类型），
         // 但**形状**必须是对的 —— 否则兜底本身就会产出坏 body。
-        let fallback = r#"{"code":90001,"message":"系统内部错误"}"#;
-        let v: Value = serde_json::from_str(fallback).expect("兜底 body 必须是合法 JSON");
+        //
+        // ⚠️ 断言的是**生产代码用的那一份**（`FALLBACK_BODY`），
+        // **不是**测试里另写一份 —— 那才是**同义反复**。
+        //
+        // 这条在 NEX-36 收口时被**重写**：原版在测试里**另写**了一份字面量，
+        // 断言的是**测试自己的副本** —— 兜底被改坏时测试**照样绿**。
+        let v: Value = serde_json::from_str(FALLBACK_BODY).expect("兜底 body 必须是合法 JSON");
         assert_eq!(v["code"], json!(90001));
+        assert_eq!(v["message"], json!("系统内部错误"));
+        // 兜底也**不得**带 data 字段 —— 它是失败响应
+        assert!(
+            v.get("data").is_none(),
+            "兜底 body 不应含 data：{FALLBACK_BODY}"
+        );
+    }
+
+    #[test]
+    fn the_production_fallback_is_the_one_under_test() {
+        // ⚠️ 这条是**防同义反复**的元断言 ——
+        // 断言「`to_bytes` 的兜底分支用的就是 `FALLBACK_BODY`」。
+        //
+        // # 为什么不能只**数出现次数**
+        //
+        // 计数会把**文档注释**里的引用也算进去 ——
+        // 那是**脆的**（改个注释就可能让阈值漂移，
+        // 或者反过来，注释里多写一次就把计数撑过去了）。
+        //
+        // 正确做法：**抽出 `to_bytes` 的函数体**，断言它**引用**了该常量。
+        // 这样「兜底被改回内联字面量」时，本条**必然**变红。
+        //
+        // ⚠️ 为什么需要这条：上一条测试断言的是**常量**，
+        // 但**没人**保证 `to_bytes` 真的用它。
+        let src = include_str!("response.rs");
+
+        // 抽出 `to_bytes` 的函数体
+        let start = src
+            .find("pub fn to_bytes(&self) -> Vec<u8> {")
+            .expect("源码里应存在 `to_bytes`");
+        let body_start = start + "pub fn to_bytes(&self) -> Vec<u8> {".len();
+        let body_end = src[body_start..]
+            .find("\n}")
+            .map(|i| body_start + i)
+            .expect("`to_bytes` 的函数体应有结束括号");
+
+        let body = &src[body_start..body_end];
+        assert!(
+            body.contains("FALLBACK_BODY"),
+            "`to_bytes` 的兜底分支必须用 `FALLBACK_BODY` —— \
+             否则测试断言的是**另一份**字面量（同义反复）。实际函数体：{body}"
+        );
     }
 }

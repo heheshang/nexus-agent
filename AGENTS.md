@@ -119,8 +119,6 @@ feat(core): 增加取消语义类型状态 (NEX-101)
 |---|---|
 | `docs/README.md` | `docs/` 文档总索引 |
 | `docs/operations/ai-sdlc-workflow-handbook.md` | 人类可读的流程手册 |
-| `docs/ai-sdlc/README.md` | AI-SDLC 文档导航（覆盖矩阵 / 术语表 / DoR / 评审 / 度量 / 适配器手册） |
-| `docs/ai-sdlc/coverage-matrix.md` | 上游 AI-SDLC 规范逐条适配状态 |
 | `docs/architecture/2026-11-04-nexusagent-rust-architecture-design.md` | 架构与契约的**唯一权威** |
 | `backlog/README.md` | 任务文件格式与生命周期 |
 | `scripts/check-rules.sh` | 规则文件一致性校验 |

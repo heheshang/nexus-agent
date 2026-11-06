@@ -129,8 +129,6 @@ AI-SDLC 是**决策引擎**，采用三层产出模型（`~/.claude/plugins/mark
 | `AGENTS.md` | 项目级代理指令入口 |
 | `docs/README.md` | `docs/` 文档总索引 |
 | `docs/operations/ai-sdlc-workflow-handbook.md` | 人类可读的流程手册（叙事版） |
-| `docs/ai-sdlc/README.md` | AI-SDLC 文档导航（覆盖矩阵 / 术语表 / 各操作手册） |
-| `docs/ai-sdlc/coverage-matrix.md` | 上游 AI-SDLC 规范逐条适配状态 |
 | `backlog/tasks/` | DoR 任务载体（Task 层产出） |
 | `backlog/README.md` | 任务文件格式与生命周期 |
 | `scripts/check-rules.sh` | 规则文件一致性校验 |

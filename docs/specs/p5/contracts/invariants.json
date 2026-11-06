@@ -218,7 +218,7 @@
         "crates/nexus-api/tests/response.rs::a_success_response_carries_the_numeric_zero_code",
         "crates/nexus-api/tests/response.rs::a_failure_response_carries_the_business_code"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P5-I17",
@@ -227,7 +227,7 @@
       "verified_by": [
         "crates/nexus-api/tests/response.rs::the_response_body_carries_no_internal_cause"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P5-I18",
@@ -236,7 +236,7 @@
       "verified_by": [
         "crates/nexus-api/tests/response.rs::the_http_status_matches_the_business_code"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P5-I19",
@@ -245,16 +245,16 @@
       "verified_by": [
         "crates/nexus-api/tests/response.rs::an_absent_data_field_is_omitted"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P5-I20",
       "statement": "序列化失败仍有合法 JSON body —— 不是空 body",
       "layer": "behavior",
       "verified_by": [
-        "crates/nexus-api/tests/response.rs::the_fallback_body_is_still_valid_json"
+        "crates/nexus-api/src/response.rs::the_fallback_body_is_still_valid_json"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P5-I21",

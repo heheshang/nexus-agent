@@ -231,13 +231,6 @@ AI-SDLC 叫自己「决策引擎」，因为**决策权始终在人手里**。
 | `.cursor/rules/ai-sdlc-decision-authority.mdc` | 决策三分类与升级 |
 | `.cursor/rules/ai-sdlc-quality-gates.mdc` | 门禁分级与评审 |
 | `docs/README.md` | `docs/` 文档总索引 |
-| `docs/ai-sdlc/README.md` | AI-SDLC 文档导航（操作手册入口） |
-| `docs/ai-sdlc/coverage-matrix.md` | 上游 AI-SDLC 规范逐条适配状态 |
-| `docs/ai-sdlc/dor-playbook.md` | DoR 门禁操作手册 |
-| `docs/ai-sdlc/review-playbook.md` | 评审操作手册 |
-| `docs/ai-sdlc/metrics-playbook.md` | 度量与校准操作手册 |
-| `docs/ai-sdlc/adapter-inventory.md` | 外部系统与凭据清单 |
-| `docs/ai-sdlc/glossary.md` | 术语表 |
 | `docs/specs/README.md` | Spec 层（Tier 2）产物说明 |
 | `docs/rfcs/README.md` | RFC 层（Tier 1）产物说明 |
 | `AGENTS.md` | 常驻指令入口 |

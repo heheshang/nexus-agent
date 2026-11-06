@@ -118,7 +118,7 @@ P5 完成判据之外的**加固**任务：`FrameDecoder` 的缓冲区当前**�
 
 同时做**门禁自身的防伪验证**（NEX-24 / NEX-25 的教训）。
 
-对应 backlog 任务：`backlog/tasks/NEX-36 - docs(api) P5 收口 —— 架构文档同步与契约升格.md`
+对应 backlog 任务：`backlog/completed/NEX-36 - docs(api) P5 收口 —— 架构文档同步与契约升格.md`
 依赖：T-001、T-002、T-003、T-004、T-005
 对应设计条款：架构文档 §6.1、§6.2
 
