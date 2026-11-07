@@ -1,7 +1,7 @@
 ---
 id: NEX-38
 title: "feat(workflow): 落地冻结定义与图编译"
-status: In Review
+status: Done
 assignee: []
 labels: [workflow, graph-engine, core]
 priority: high
