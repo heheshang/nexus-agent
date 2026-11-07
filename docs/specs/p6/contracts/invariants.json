@@ -186,66 +186,80 @@
       "id": "P6-I09",
       "statement": "定义哈希与键序无关 —— 规范化保证哈希稳定",
       "layer": "behavior",
+      "crate": "nexus-workflow",
       "verified_by": [
-        "crates/nexus-workflow/src/definition.rs::the_definition_hash_is_key_order_independent"
+        "crates/nexus-workflow/tests/definition.rs::hash_is_independent_of_key_order",
+        "crates/nexus-workflow/tests/definition.rs::key_order_independence_comes_from_canonicalization"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P6-I10",
       "statement": "冻结定义是三件套 —— canonical / hash / engine_version 缺一不可",
       "layer": "behavior",
+      "crate": "nexus-workflow",
       "verified_by": [
-        "crates/nexus-workflow/src/definition.rs::the_frozen_definition_carries_all_three_parts"
+        "crates/nexus-workflow/tests/definition.rs::frozen_definition_exposes_canonical_hash_and_engine_version",
+        "crates/nexus-workflow/tests/definition.rs::engine_version_is_independent_of_the_hash"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P6-I11",
       "statement": "触发语义是 AllPredecessor —— 所有前驱完成才触发",
       "layer": "behavior",
+      "crate": "nexus-workflow",
       "verified_by": [
-        "crates/nexus-workflow/tests/graph.rs::a_node_waits_for_all_of_its_predecessors"
+        "crates/nexus-workflow/tests/graph.rs::node_waits_for_all_predecessors",
+        "crates/nexus-workflow/tests/graph.rs::node_with_single_predecessor_triggers_after_it_completes"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P6-I12",
       "statement": "图有环时编译失败 —— 不是死循环",
       "layer": "behavior",
+      "crate": "nexus-workflow",
       "verified_by": [
-        "crates/nexus-workflow/tests/graph.rs::a_cyclic_graph_fails_to_compile"
+        "crates/nexus-workflow/tests/graph.rs::cycle_is_rejected_instead_of_hanging",
+        "crates/nexus-workflow/tests/graph.rs::self_loop_is_rejected"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P6-I13",
       "statement": "子图递归被检测 —— 自引用编译失败，不是无限展开",
       "layer": "behavior",
+      "crate": "nexus-workflow",
       "verified_by": [
-        "crates/nexus-workflow/tests/graph.rs::a_recursive_subgraph_is_rejected"
+        "crates/nexus-workflow/tests/graph.rs::recursive_subgraph_is_rejected_instead_of_expanding_forever",
+        "crates/nexus-workflow/tests/graph.rs::mutually_recursive_subgraphs_are_rejected",
+        "crates/nexus-workflow/tests/graph.rs::the_same_subgraph_used_twice_is_not_recursion"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P6-I14",
       "statement": "展开上限三个各自生效 —— 深度 8 / 节点 128 / 状态 4 MiB",
       "layer": "behavior",
+      "crate": "nexus-workflow",
       "verified_by": [
-        "crates/nexus-workflow/tests/graph.rs::the_nesting_depth_limit_is_enforced",
-        "crates/nexus-workflow/tests/graph.rs::the_expanded_node_count_limit_is_enforced",
-        "crates/nexus-workflow/tests/graph.rs::the_state_size_limit_is_enforced"
+        "crates/nexus-workflow/tests/graph.rs::each_expansion_limit_triggers_independently",
+        "crates/nexus-workflow/tests/graph.rs::exactly_the_depth_limit_is_accepted",
+        "crates/nexus-workflow/tests/graph.rs::exactly_the_node_limit_is_accepted"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P6-I15",
       "statement": "超限映射到 BudgetExceeded —— 不是 panic",
       "layer": "behavior",
+      "crate": "nexus-workflow",
       "verified_by": [
-        "crates/nexus-workflow/tests/graph.rs::an_expansion_limit_is_reported_as_budget_exceeded"
+        "crates/nexus-workflow/tests/graph.rs::limit_violations_map_to_budget_exceeded_not_panic",
+        "crates/nexus-workflow/tests/graph.rs::state_size_violation_maps_to_budget_exceeded"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P6-I16",
