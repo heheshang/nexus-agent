@@ -1,0 +1,7 @@
+error[E0560]: struct `UserFacing` has no field named `cause`
+  --> tests/compile_fail/user_facing_cannot_carry_cause.rs:23:9
+   |
+23 |         cause: Some("db password=hunter2"),
+   |         ^^^^^ `UserFacing` does not have this field
+   |
+   = note: all struct fields are already assigned

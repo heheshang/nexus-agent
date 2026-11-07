@@ -1,0 +1,7 @@
+error[E0559]: variant `EventPayload::ToolResult` has no field named `ms`
+  --> tests/compile_fail/event_payload_field_name_typo.rs:23:9
+   |
+23 |         ms: 12,
+   |         ^^ `EventPayload::ToolResult` does not have this field
+   |
+   = note: available fields are: `elapsed_ms`

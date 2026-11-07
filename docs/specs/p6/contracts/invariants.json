@@ -265,30 +265,33 @@
       "id": "P6-I16",
       "statement": "条件求值失败是错误 —— 不是 false（否则走错分支）",
       "layer": "behavior",
+      "crate": "nexus-workflow",
       "verified_by": [
         "crates/nexus-workflow/tests/node.rs::a_failed_condition_evaluation_is_an_error",
         "crates/nexus-workflow/tests/node.rs::a_missing_condition_variable_is_an_error",
         "crates/nexus-workflow/tests/node.rs::a_non_boolean_condition_result_is_an_error"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P6-I17",
       "statement": "模板渲染保留原始类型 —— 整串 {{...}} 时数字仍是数字",
       "layer": "behavior",
+      "crate": "nexus-workflow",
       "verified_by": [
         "crates/nexus-workflow/tests/node.rs::a_whole_string_template_keeps_the_original_type"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P6-I18",
       "statement": "插值结果仍含 {{ 时报错 —— 未解析的工具参数模板",
       "layer": "behavior",
+      "crate": "nexus-workflow",
       "verified_by": [
         "crates/nexus-workflow/tests/node.rs::an_unresolved_template_is_rejected"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P6-I19",
@@ -339,10 +342,13 @@
       "id": "P6-I24",
       "statement": "nexus-workflow 的节点执行热路径不含 Box<dyn>",
       "layer": "structure",
+      "crate": "nexus-workflow",
       "verified_by": [
-        "crates/nexus-workflow/tests/architecture.rs::the_workflow_crate_does_not_use_box_dyn_on_the_node_hot_path"
+        "crates/nexus-workflow/tests/architecture.rs::the_workflow_crate_does_not_use_box_dyn_on_the_node_hot_path",
+        "crates/nexus-workflow/tests/architecture.rs::the_dyn_trait_object_only_appears_at_the_graph_loading_site",
+        "crates/nexus-workflow/tests/architecture.rs::the_graph_loading_site_uses_arc_dyn_node_invoke"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P6-I25",
