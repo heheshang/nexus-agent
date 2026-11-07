@@ -224,6 +224,34 @@ else
 fi
 
 echo ""
+echo "── 规则 8：nexus-repo → nexus-execution 禁止（反向会成环，架构文档 §4.4 规则 4）──"
+# 决策 D12（选项 B，操作者 2026-11-06 裁决）确立了
+# `nexus-execution → nexus-repo` 的**单向**依赖：
+# 执行层复用数据层的引擎侧持久化能力（租约 / fencing / 幂等提交 / 事件序号）。
+#
+# 为什么这条**必须**单独写：
+# - Cargo 会在**编译期**拒绝环 —— 但那只是兜底，不是契约验证；
+# - `deps_of` 是本脚本的**声明式依赖表** ——
+#   「`deps_of nexus-repo` 里没有 `nexus-execution`」这件事
+#   **本身**就是契约，需要一条规则把它钉住；
+# - 规则 5 判的是「能力层不依赖 nexus-repo」，
+#   判的是**另一个方向**。
+violations=0
+if grep -q '^nexus-execution\.workspace' crates/nexus-repo/Cargo.toml 2>/dev/null; then
+    echo "  ✗ nexus-repo 依赖了 nexus-execution（反向会成环：execution → repo → execution）"
+    violations=$((violations + 1))
+fi
+if deps_of nexus-repo | grep -qw nexus-execution; then
+    echo "  ✗ deps_of nexus-repo 声明了 nexus-execution（反向会成环）"
+    violations=$((violations + 1))
+fi
+if [ "$violations" -eq 0 ]; then
+    echo "  ✓ nexus-repo 不依赖 nexus-execution（单向：execution → repo）"
+else
+    fail=1
+fi
+
+echo ""
 echo "── 实际依赖图（cargo tree 校验） ──"
 if cargo tree --workspace --prefix none --depth 1 > /dev/null 2>&1; then
     echo "  ✓ cargo tree 可解析，实际图与声明一致（cargo 自身会拒绝环）"

@@ -31,6 +31,8 @@ anyhow.workspace = true
 [dev-dependencies]
 # 负向测试框架：断言「写错的代码编译不过」（架构文档 §5.2）
 trybuild.workspace = true
+# token 级源码扫描（结构层断言的底层工具）
+syn.workspace = true
 
 [lints]
 workspace = true

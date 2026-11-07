@@ -12,8 +12,24 @@
 //! | `nexus_model_has_no_database_traces` | §4.2 差异 2 |
 //! | `capability_layer_does_not_depend_on_nexus_repo` | §4.1.2（防环） |
 //! | `nexus_repo_depends_only_on_capability_layer` | §4.1.2（正向：repo → 能力层） |
-//! | `nexus_repo_does_not_touch_workflow_runs` | §4.2 差异 1（负向：`nexus-repo` 不许碰） |
-//! | `workflow_runs_appears_only_in_execution_owned_crates` | §4.2 差异 1（允许集：全 workspace） |
+//! | `nexus_repo_does_not_touch_workflow_runs` | §4.2 差异 1（负向：`nexus-repo` 不许**写**） |
+//! | `workflow_runs_appears_only_in_execution_owned_crates` | §4.2 差异 1（**写操作**归属：全 workspace） |
+//! | `nexus_repo_does_not_depend_on_the_execution_layer` | §4.4 规则 4（反向依赖禁止） |
+//!
+//! # ⚠️ 「写入权唯一」的判定手段（决策 D12 · 选项 B，2026-11-06 修订）
+//!
+//! 原判定是「**类型**归属」—— `nexus-repo` 不得引用 `workflow_runs` 的**类型**。
+//! 依赖方向改为 `execution → repo` 后，那个手段**不再等价**于「写入权唯一」：
+//! `nexus-repo` 的类型对所有依赖它的 crate **可见**，
+//! 「名字不出现在 `nexus-repo`」**推不出**「别的 crate 写不了」。
+//!
+//! 判定手段改为「**写操作**归属」——
+//! 全 workspace 扫描 `workflow_runs` / `workflow_step_runs` 的
+//! `INSERT` / `UPDATE` / `DELETE`，写操作**只允许**出现在 `nexus-execution`；
+//! `nexus-infra` 允许**建表 DDL**（迁移），不是访问。
+//!
+//! 强度**不降** —— 前者可被「把类型下沉到 `nexus-repo`」绕过，
+//! 后者管住**任何 crate 的任何写操作**。
 //!
 //! 设计文档 §5.2 还要求一类**负向测试**（用 `trybuild` 断言某段代码不能编译），
 //! 用于验证「取消语义靠类型保证」。那部分属于 P1（`nexus-core` 类型落地后）。
@@ -330,101 +346,53 @@ fn nexus_model_has_no_database_traces() {
     );
 }
 
-/// §4.2 差异 1 —— `nexus-repo` **不得**引用 `workflow_runs`。
+/// §4.2 差异 1 —— `workflow_runs` / `workflow_step_runs` 的**写操作**
+/// **只允许**出现在 `nexus-execution`。
 ///
-/// # 为什么这条铁律存在
+/// # 为什么判定手段是「**写操作**归属」而不是「**类型**归属」
 ///
-/// `workflow_runs` 是**产品侧**的运行表，`nexus-execution` **独占**它。
+/// 依赖方向改为 `execution → repo`（决策 D12 · 选项 B）之后，
+/// `nexus-repo` 的类型对**所有依赖它的 crate**（`nexus-service` / `nexus-api`）
+/// **可见** —— 于是「`nexus-repo` 不持有该类型」**推不出**
+/// 「别的 crate 写不了」。
 ///
-/// 实证依据（架构文档 §4.3.2 的论证）：
-/// §2.5.4 的租约模型要求写入必须带 `generation` 做 fencing ——
-/// 这个逻辑属于**执行层**。
+/// 原判定（`nexus-repo` 不得引用 `workflow_runs` 的**类型**）
+/// 可被「把类型下沉到 `nexus-repo`」绕过 —— 那时别的 crate 照样能写。
 ///
-/// API 进程抢写 run 状态 = **绕过 fencing** = 僵尸 worker 能覆盖新 worker 的写入。
-/// `examples/demo-lease-fencing` 验证了 generation fencing 能拒绝僵尸写入 ——
-/// 但那个保证的前提是**只有执行层能写** `workflow_runs`。
+/// 改为「**写操作**只允许出现在某处」后，管住的是
+/// **任何 crate 的任何写操作** —— 强度**不降**。
 ///
-/// 引擎侧用的是**另一张表** `execution_runs`（§3.9.4 的刻意偏离）。
-/// 本任务（NEX-12）落地的租约机制操作的就是 `execution_runs`。
+/// # 判据
 ///
-/// # 这条测试防的是什么
+/// 全 workspace 扫描**生产代码**（`src/`）：
+/// 对 `workflow_runs` / `workflow_step_runs` 的
+/// `INSERT` / `UPDATE` / `DELETE`，写操作**只允许**出现在 `nexus-execution`。
 ///
-/// 有人图省事，在 `nexus-repo` 里直接给 `workflow_runs` 写个行类型或一条 SQL。
-/// 那会让「只有执行层能写」的前提**失效**，而失效是**静默**的 ——
-/// 直到某天僵尸 worker 覆盖了新 worker 的写入才会暴露。
-#[test]
-fn nexus_repo_does_not_touch_workflow_runs() {
-    let src_dir = workspace_root()
-        .join("crates")
-        .join("nexus-repo")
-        .join("src");
-    if !src_dir.exists() {
-        return;
-    }
-
-    let mut violations = Vec::new();
-    for file in walk_rs(&src_dir) {
-        let content = std::fs::read_to_string(&file).expect("读取源文件失败");
-        let scanned = token_scan::scan_code(&content).unwrap_or_else(|e| {
-            panic!(
-                "解析 {} 失败：{e} —— 解析失败会让扫描结果**不完整**，\
-                 那正是「静默失效」的形态",
-                file.display()
-            )
-        });
-        if scanned.identifiers.contains("workflow_runs") {
-            violations.push(format!("{} 引用了 workflow_runs", file.display()));
-        }
-    }
-
-    assert!(
-        violations.is_empty(),
-        "workflow_runs 由 nexus-execution 独占 —— nexus-repo 不得引用：\n{}",
-        violations.join("\n")
-    );
-}
-
-/// §4.2 差异 1 —— `workflow_runs` **只允许**在 `nexus-execution` 出现。
-///
-/// # 为什么这条与已有的负向断言**不重复**
-///
-/// [`nexus_repo_does_not_touch_workflow_runs`] 是**负向**断言：
-/// 「`nexus-repo` 不得引用 `workflow_runs`」。
-///
-/// 但它**只管住了一个 crate**。`nexus-service` / `nexus-api` / `nexus-agent`
-/// 等任何其他 crate 引用 `workflow_runs`，那条测试**照样绿** ——
-/// 而那同样会破坏「只有执行层能写 `workflow_runs`」的前提。
-///
-/// 本条是**允许集**断言：**全 workspace** 扫描，除了 `nexus-execution`
-/// 与 `nexus-infra`（迁移基线的建表 DDL）之外，**任何** crate 的源码
-/// 都不许出现 `workflow_runs` / `workflow_step_runs`。
-///
-/// # 为什么只扫描 `src/`，不扫描 `tests/`
+/// # 为什么**不扫描** `tests/`
 ///
 /// 架构测试**自己**必须提到表名 —— 断言的允许集里就写着
 /// `"workflow_runs"`。扫描 `tests/` 会让这条测试**把自己判成违规**。
 ///
-/// 约束的对象是**生产代码** —— `src/` 里出现 `workflow_runs` 才意味着
+/// 约束的对象是**生产代码** —— `src/` 里出现写操作才意味着
 /// 「有 crate 在访问它」。`tests/` 里出现只意味着「有测试在断言它」。
 ///
-/// # 允许 `nexus-infra` 的理由
+/// # 为什么允许 `nexus-infra`
 ///
 /// `nexus-infra` 持有**迁移文件** —— `workflow_runs` 的表结构必须在
-/// 迁移里定义（否则表根本建不出来）。那是**建表**，不是**访问**。
+/// 迁移里定义（否则表根本建不出来）。那是**建表 DDL**，不是**访问**。
 ///
-/// # 允许 `nexus-execution` 的理由
+/// ⚠️ 关键区分：`CREATE TABLE workflow_runs (...)` **不是写操作** ——
+/// 扫描器只认 `INSERT` / `UPDATE` / `DELETE`。建表是**结构**定义，
+/// 不是**数据**写入。
 ///
-/// 架构文档 §4.2 差异 1 明文规定：`workflow_runs` 由 `nexus-execution` 独占。
+/// # 为什么允许 `nexus-execution`
 ///
-/// # 为什么剥离注释
-///
-/// 文档注释里写「本 crate 不碰 `workflow_runs`」是**说明性文字**，
-/// 不是数据库访问。扫描时必须剥离注释 —— 否则
-/// 「把边界写清楚」反而会让门禁红。
+/// 架构文档 §4.2 差异 1 明文规定：`workflow_runs` / `workflow_step_runs`
+/// 的**写入权**由 `nexus-execution` 独占。
 #[test]
 fn workflow_runs_appears_only_in_execution_owned_crates() {
-    /// 允许引用 `workflow_runs` 的 crate。
-    const ALLOWED: &[&str] = &["nexus-execution", "nexus-infra"];
+    /// 允许**写** `workflow_runs` / `workflow_step_runs` 的 crate。
+    const WRITE_OWNER: &str = "nexus-execution";
 
     /// 被独占的表名。
     const EXCLUSIVE_TABLES: &[&str] = &["workflow_runs", "workflow_step_runs"];
@@ -433,7 +401,8 @@ fn workflow_runs_appears_only_in_execution_owned_crates() {
     let mut violations = Vec::new();
 
     for crate_name in all_crates() {
-        if ALLOWED.contains(&crate_name.as_str()) {
+        // 独占方**自己**写 —— 允许。
+        if crate_name == WRITE_OWNER {
             continue;
         }
 
@@ -455,9 +424,11 @@ fn workflow_runs_appears_only_in_execution_owned_crates() {
                 )
             });
             for table in EXCLUSIVE_TABLES {
-                if scanned.mentions(table) {
+                // ⚠️ 判据是「**写**过这张表」，不是「提到过这张表」。
+                // 「提到」会把 `SELECT` 也算进去 —— 而**读**不构成写入。
+                if scanned.writes_table(table) {
                     violations.push(format!(
-                        "{}（crate `{crate_name}`）引用了 `{table}`",
+                        "{}（crate `{crate_name}`）**写**了 `{table}`",
                         file.display()
                     ));
                 }
@@ -467,9 +438,86 @@ fn workflow_runs_appears_only_in_execution_owned_crates() {
 
     assert!(
         violations.is_empty(),
-        "`workflow_runs` / `workflow_step_runs` 只允许出现在 \
-         `nexus-execution`（独占方）与 `nexus-infra`（迁移 DDL）中：\n{}",
+        "`workflow_runs` / `workflow_step_runs` 的**写操作**只允许出现在 \
+         `{WRITE_OWNER}`（写入权独占方）：\n{}",
         violations.join("\n")
+    );
+}
+
+/// §4.2 差异 1 —— `nexus-repo` **不得**写 `workflow_runs`。
+///
+/// # 与 [`workflow_runs_appears_only_in_execution_owned_crates`] 的关系
+///
+/// 那条是**全 workspace** 的允许集断言；本条是针对 `nexus-repo` 的
+/// **负向**断言 —— 它给出**更具体**的失败信息：
+/// 「`nexus-repo` 写了产品侧运行表」正是最可能的违规形态。
+///
+/// # 为什么在依赖方向改为 `execution → repo` 之后**仍然**要这条
+///
+/// 依赖方向改了，但「`workflow_runs` 的写入权归执行层」这条**契约**没改。
+/// `nexus-repo` 持有引擎侧持久化能力（租约 / fencing / 幂等提交）——
+/// 那让它「**有能力**写 `workflow_runs`」变成了现实风险，
+/// 所以这条断言从「不得**引用**」收紧为「不得**写**」。
+#[test]
+fn nexus_repo_does_not_touch_workflow_runs() {
+    let src_dir = workspace_root()
+        .join("crates")
+        .join("nexus-repo")
+        .join("src");
+    if !src_dir.exists() {
+        return;
+    }
+
+    let mut violations = Vec::new();
+    for file in walk_rs(&src_dir) {
+        let content = std::fs::read_to_string(&file).expect("读取源文件失败");
+        let scanned = token_scan::scan_code_and_strings(&content).unwrap_or_else(|e| {
+            panic!(
+                "解析 {} 失败：{e} —— 解析失败会让扫描结果**不完整**，\
+                 那正是「静默失效」的形态",
+                file.display()
+            )
+        });
+        for table in ["workflow_runs", "workflow_step_runs"] {
+            if scanned.writes_table(table) {
+                violations.push(format!("{} **写**了 {table}", file.display()));
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "workflow_runs 由 nexus-execution 独占 —— nexus-repo 不得写它：\n{}",
+        violations.join("\n")
+    );
+}
+
+/// §4.4 规则 4 —— `nexus-repo` **不得**依赖 `nexus-execution`。
+///
+/// # 为什么这条必须存在
+///
+/// 决策 D12（选项 B）确立了 `nexus-execution → nexus-repo` 的**单向**依赖。
+/// 反向依赖会成环（`execution → repo → execution`）——
+/// Cargo 在**编译期**就会拒绝，所以它不会「悄悄跑起来」。
+///
+/// 但这条断言**不是**多此一举：
+///
+/// 1. 它给出的**失败信息**比 Cargo 的环报错**可读得多**；
+/// 2. 它把「单向」这条**契约**钉在**测试**里，
+///    而不只是依赖 Cargo 的隐式保证 ——
+///    「Cargo 会拒绝」不等于「架构文档 §4.4 规则 4 被验证过」；
+/// 3. `dependency_graph_is_acyclic` 判的是「**无环**」，
+///    判不出「**方向对**」—— 一个 `repo → execution → repo` 的环
+///    同样会让它红，但**不是**本条要说的那件事。
+#[test]
+fn nexus_repo_does_not_depend_on_the_execution_layer() {
+    let deps = internal_deps("nexus-repo");
+
+    assert!(
+        !deps.iter().any(|d| d == "nexus-execution"),
+        "nexus-repo 不得依赖 nexus-execution —— 反向会成环\
+         （架构文档 §4.4 规则 4：execution → repo 允许，repo → execution 禁止）。\
+         实际依赖：{deps:?}"
     );
 }
 

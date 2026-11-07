@@ -46,8 +46,13 @@
 //!
 //! `workflow_runs` 与 `workflow_step_runs` **没有**行类型 ——
 //! 架构文档 §4.2 差异 1 与 `docs/operations/p2-plan.md` 的红线 3 都规定：
-//! `workflow_runs` 由 `nexus-execution` **独占**，行类型也归它。
-//! `nexus-repo` 引用它就是偏离架构决策。
+//! 这两张表的**写入权**由 `nexus-execution` **独占**，行类型也归它。
+//!
+//! ⚠️ **约束落在「写操作」上**（2026-11-06 修订，决策 D12 · 选项 B）：
+//! 依赖方向改为 `nexus-execution → nexus-repo` 后，本 crate 的类型对**所有**
+//! 依赖它的 crate **可见** —— 「行类型不在本 crate」**推不出**
+//! 「别的 crate 写不了」。真正的约束是：
+//! 这两张表的 `INSERT` / `UPDATE` / `DELETE` **只允许**出现在 `nexus-execution`。
 //!
 //! # 裸 `i64` 主键
 //!

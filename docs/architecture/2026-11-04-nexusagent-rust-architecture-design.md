@@ -1467,7 +1467,18 @@ Rust 版把「约定」换成**可执行的结构层判定**：
 >
 > 因此判定手段从「**名字**只允许出现在某处」改为「**写操作**只允许发生在某处」。
 > 强度**不降**：前者可被「把类型下沉到 `nexus-repo`」绕过，
-> 后者管住**任何 crate 的任何写操作**，与 `nexus-repo` 是否持有该类型无关。
+> 后者管住**写操作归属**，与 `nexus-repo` 是否持有该类型无关。
+>
+> ⚠️ **识别覆盖的 SQL 形态有边界**（2026-11-06 NEX-37 预审实测）：
+> `extract_sql_writes` 是**词法级**识别，当前覆盖 `INSERT` / `UPDATE` / `DELETE` 的
+> **基本形态**（含大小写、空白、换行、引号标识符、`CTE`、`ON CONFLICT`）。
+> **不覆盖**：schema 限定（`INSERT INTO public.workflow_runs`）、
+> SQL 注释插入（`INSERT /* c */ INTO workflow_runs`）、
+> `REPLACE INTO` / `MERGE INTO` / `COPY ... FROM` / `TRUNCATE TABLE`。
+>
+> ⚠️ 这些形态**当前会漏判**（实测可绕过断言），修复登记为 **NEX-52**。
+> **当前代码无实际违规** —— `nexus-repo` 对这两张表的引用**全部**在文档注释里。
+> 但「管住任何 crate 的任何写操作」这句**只在已覆盖的形态上成立**。
 >
 > 依赖方向本身**仍然单向**：`nexus-repo → nexus-execution` **禁止**（§4.4）。
 >
@@ -1475,6 +1486,27 @@ Rust 版把「约定」换成**可执行的结构层判定**：
 > 需**人工评审**，且 AI 产出的改动需**额外一名评审**。
 
 > **验证记录（2026-11-04）**：`nexus-model` 源码扫描（禁止 `FromRow` / `sqlx::` / `Type> for` 标识符）通过，0 违规。该检查可作为架构测试的第三个断言。
+
+> **落地记录（2026-11-06，NEX-37 / T-001 完成）**：
+>
+> 「写操作归属」这条判定已**实际落地**为可执行断言，判据基于**新增**的
+> token 级能力 `ScanResult::writes_table` / `extract_sql_writes`
+> （`crates/nexus-core/tests/support/token_scan.rs`）：
+> 把 SQL 文本拆成**词序列**，识别 `INSERT` / `UPDATE` / `DELETE` 及其**目标表**。
+>
+> | 断言 | 位置 |
+> |---|---|
+> | `workflow_runs_appears_only_in_execution_owned_crates` | `nexus-core/tests/architecture.rs` |
+> | `nexus_repo_does_not_touch_workflow_runs` | `nexus-core/tests/architecture.rs` |
+> | `nexus_repo_must_not_write_execution_owned_tables` | `nexus-repo/tests/architecture.rs` |
+>
+> **故障注入已验证**（注入什么 / 期望 / 实际）：
+>
+> | 注入 | 期望 | 实际 |
+> |---|---|---|
+> | 在 `nexus-repo/src/users.rs` 里把一条 `INSERT INTO users` 改成 `INSERT INTO workflow_runs` | 三条断言**全部**变红 | ✅ 三条**全部**变红，并精确报出文件名与表名 |
+> | 在 `nexus-execution/src/lib.rs` 里内联一条带 `generation = ` / `lease_owner = ` 的围栏 UPDATE | `the_execution_crate_does_not_inline_fenced_writes` 变红 | ✅ 变红，并逐条报出命中的围栏子句 |
+> | 从 `Fence::CONDITIONS_TEMPLATE` 删掉 `generation` 条件**并同步删掉绑定** | `stale_generation_write_is_rejected` / `fenced_counter_increment_is_rejected` 变红 | ✅ 两条**都**变红（断言的是「僵尸写入被拒」这一**行为**，不是 SQL 文本） |
 
 ### 差异 2：`nexus-model` 是独立的纯 DTO crate
 
@@ -1497,7 +1529,7 @@ Rust 版把「约定」换成**可执行的结构层判定**：
 | 项 | 设计目标 | 当前实现 | 状态 |
 |---|---|---|---|
 | `nexus-repo` ↔ `nexus-rag` | 单向 `repo → rag` | 已单向（`repo` 依赖 `rag`）；**但 `nexus-rag` 尚未定义任何 trait** —— 见下方注记 | ⚠️ **部分**（依赖方向成立，trait 落地属 P7） |
-| `nexus-execution` → `nexus-repo` | **依赖**（执行层复用数据层的引擎侧持久化；`workflow_runs` 的**写操作**仍只在执行层） | 不依赖 | ⚠️ **待 T-001 落地**（P6 · 决策 D12 选项 B，2026-11-06 操作者裁决） |
+| `nexus-execution` → `nexus-repo` | **依赖**（执行层复用数据层的引擎侧持久化；`workflow_runs` 的**写操作**仍只在执行层） | **依赖**（`nexus-execution/Cargo.toml` 声明 `nexus-repo.workspace = true`；引擎侧持久化模块**留在** `nexus-repo`） | ✅ **已落地**（P6 · 决策 D12 选项 B，2026-11-06 操作者裁决；NEX-37 / T-001） |
 | `nexus-model` 纯净 | 无数据库痕迹 | 无 | ✅ |
 | `nexus-core` 子模块 | 类型状态、事件、错误 | 类型化 ID（18）+ 取消语义 + 事件（12）+ 业务码（42） | ✅ |
 | `nexus-mcp` / `nexus-a2a` 位置 | 见 §4.3.1（已定稿） | 能力层（不依赖 `service`） | ✅ |
@@ -1665,7 +1697,13 @@ pub struct ChatService {
 > `nexus-infra` 允许的是**建表 DDL**（迁移），不是访问。
 >
 > 强度**不降**：前者可被「把类型下沉到 `nexus-repo`」绕过，
-> 后者管住**任何 crate 的任何写操作**。
+> 后者管住**写操作归属**。
+>
+> ⚠️ **识别边界**：`extract_sql_writes` 是**词法级**识别，只覆盖
+> `INSERT` / `UPDATE` / `DELETE` 的**基本形态**；
+> **不覆盖** schema 限定（`INSERT INTO public.workflow_runs`）、
+> SQL 注释插入、`REPLACE INTO` / `MERGE INTO` / `COPY` / `TRUNCATE` ——
+> 这些形态**当前会漏判**，修复登记为 **NEX-52**。
 > 约束 1、3、4 **不受影响**，仍然成立。
 >
 > 这四条正是 §4.4 硬约束的具体化，由 `scripts/check-deps.sh` 强制。
@@ -1760,6 +1798,17 @@ nexus-memory       （能力层）    依赖 nexus-vector 的 trait
    反向依赖会成环（`execution → repo → execution`），Cargo 在编译期就会拒绝。
    与 §4.1.1 的层次表「执行 → 数据 ✅」一致。
 
+   > **落地记录（2026-11-06，NEX-37 / T-001 完成）**：
+   > 规则 4 由**三处**共同守护 ——
+   > `nexus-core` 的 `nexus_repo_does_not_depend_on_the_execution_layer`、
+   > `nexus-repo` 的 `the_repo_crate_does_not_depend_on_the_execution_layer`、
+   > 以及 `scripts/check-deps.sh` 的**规则 8**（同时核对 `Cargo.toml` 与 `deps_of` 声明表）。
+   >
+   > 正向那一半（`execution → repo` **必须**存在且**可用**）由
+   > `nexus-execution` 的 `the_execution_crate_depends_on_the_data_layer` 断言 ——
+   > 它不只查 manifest，还**编译期**引用数据层的 API，
+   > 以防「依赖声明了却从未使用」的**依赖噪音**。
+
 > Cargo **编译期禁止 crate 环**，所以规则 1 与规则 4 的「反向依赖」是编译错误而非评审项。这是 Rust 移植相对 Go 版最大的工程收益 —— Go 版需要 depguard，Rust 版是免费的。
 
 → 落地见 §5.4。
@@ -1829,11 +1878,11 @@ Rust 的测试可以验证「某段代码**不能**编译」：
 
 ## 5.3 结构层的检验：架构测试
 
-当前 workspace 已有 **16 个**架构测试（依赖方向、无环、sqlx 收敛、锁纪律、依赖版本纪律、lints 继承、入口文件、`workflow_runs` 允许集、`nexus-repo` 正向依赖面）。设计文档落地后需补充：
+当前 workspace 已有 **21 个**架构测试（依赖方向、无环、sqlx 收敛、锁纪律、依赖版本纪律、lints 继承、入口文件、`workflow_runs` **写操作**归属、`nexus-repo` 正向依赖面、`nexus-repo` 反向依赖禁止、执行层围栏写经由数据层）。设计文档落地后需补充：
 
 | 测试 | 检验的设计条款 | 状态 |
 |---|---|---|
-| `workflow_runs` 的**写操作**只在 `nexus-execution` | §4.2 差异 1 | ⚠️ **待修订**（2026-11-06，决策 D12 · 选项 B）—— 现有断言是**类型归属**（允许集：`nexus-core` 的 `workflow_runs_appears_only_in_execution_owned_crates`，全 workspace 扫描；另有 `nexus-repo` 的负向断言，NEX-11 / NEX-14）。依赖方向改为 `execution → repo` 后，「类型归属」**推不出**「写入权唯一」，判定手段改为「**写操作**归属」（见 T-001 的 AC） |
+| `workflow_runs` 的**写操作**只在 `nexus-execution` | §4.2 差异 1 | ✅ **已落地**（2026-11-06，决策 D12 · 选项 B，NEX-37 / T-001）—— 判定手段已从「**类型**归属」改为「**写操作**归属」：`nexus-core` 的 `workflow_runs_appears_only_in_execution_owned_crates`（全 workspace 扫描 `INSERT` / `UPDATE` / `DELETE`，写操作只允许出现在 `nexus-execution`；`nexus-infra` 允许**建表 DDL**，不是访问）；另有 `nexus-repo` 的负向断言 `nexus_repo_must_not_write_execution_owned_tables` 与 `nexus-core` 的 `nexus_repo_does_not_touch_workflow_runs`。**强度不降** —— 类型归属可被「把类型下沉到 `nexus-repo`」绕过，写操作归属管住**写操作**（⚠️ 识别覆盖的 SQL 形态有边界，见 §4.2 差异 1 与 **NEX-52**） |
 | `nexus-model` 不含 `FromRow` / `sqlx::Type` | §4.2 差异 2 | ✅ 已有 |
 | `nexus-core` 零内部依赖 | §4.4 规则 2 | ✅ 已有 |
 | 能力层不依赖 `nexus-repo` | §4.1.2（防环） | ✅ 已有 |
@@ -1850,6 +1899,10 @@ Rust 的测试可以验证「某段代码**不能**编译」：
 | 网关的 span 生命周期**绑定流**（不是绑定「拿到流」） | §2.4 关键不变量 2 | ✅ 已落地（NEX-23 的 `the_gateway_span_closes_when_the_stream_is_consumed`，**网关层**断言 —— `nexus-observability` 的单元测试验证不了「网关是否多留了一份克隆」） |
 | 埋点**不得**把凭据写进 span 字段或日志 | §2.7 凭据纪律 | ✅ 已落地（NEX-23 的 `the_credential_never_reaches_the_instrumentation`，扫埋点调用点） |
 | `nexus-observability` 的 API **不接收**凭据类型 | §2.7 凭据纪律 | ✅ 已落地（NEX-23 的 `the_observability_api_has_no_credential_typed_parameters`） |
+| `nexus-execution` **依赖** `nexus-repo` | §4.4 规则 4 | ✅ 已落地（NEX-37 / T-001 的 `the_execution_crate_depends_on_the_data_layer` —— 断言依赖边**存在**，并**编译期**证明它**可用**） |
+| `nexus-execution` **不依赖** `nexus-service` / `nexus-api` / `nexus-cli` | §4.3.2 约束 1 | ✅ 已落地（NEX-37 / T-001 的 `the_execution_crate_does_not_depend_on_the_upper_layers`） |
+| `nexus-repo` **不依赖** `nexus-execution` | §4.4 规则 4 | ✅ 已落地（NEX-37 / T-001 的 `the_repo_crate_does_not_depend_on_the_execution_layer` + `nexus-core` 的 `nexus_repo_does_not_depend_on_the_execution_layer` + `check-deps.sh` **规则 8**） |
+| 执行层的围栏写**经由** `nexus-repo` 的带租约 API | §4.2 差异 1（围栏「一处定义」） | ✅ 已落地（NEX-37 / T-001 的 `the_execution_crate_does_not_inline_fenced_writes` —— 判据是围栏条件的**六个子句逐条**不得出现在执行层源码里） |
 
 > **落地记录（2026-11-04，P1 完成）**：本表的后两项属于 **P2** ——
 > `workflow_runs` 的写入者与 `nexus-repo` 的依赖面都要等 P2 的
@@ -1896,14 +1949,74 @@ Rust 的测试可以验证「某段代码**不能**编译」：
 > 判定手段改为「**写操作**归属」：全 workspace 扫描
 > `workflow_runs` / `workflow_step_runs` 的 `INSERT` / `UPDATE` / `DELETE`，
 > 写操作**只允许**出现在 `nexus-execution`；`nexus-infra` 允许**建表 DDL**（迁移），不是访问。
-> 强度**不降** —— 前者可被「把类型下沉到 `nexus-repo`」绕过，后者管住**任何 crate 的任何写操作**。
-> 该断言的落地是 P6 的 **T-001**（`NEX-37`）的 AC。
+> 强度**不降** —— 前者可被「把类型下沉到 `nexus-repo`」绕过，后者管住**写操作归属**。
+> ⚠️ **识别边界**：`extract_sql_writes` 是**词法级**识别，只覆盖
+> `INSERT` / `UPDATE` / `DELETE` 的**基本形态**；
+> **不覆盖** schema 限定、SQL 注释插入、`REPLACE` / `MERGE` / `COPY` / `TRUNCATE` ——
+> 修复登记为 **NEX-52**。
+>
+> **落地记录（2026-11-06，NEX-37 / T-001 完成）**：
+>
+> 判定手段已**实际落地**为三层断言：
+>
+> | 层 | 断言 | 位置 |
+> |---|---|---|
+> | 结构层 | `workflow_runs_appears_only_in_execution_owned_crates` | `nexus-core/tests/architecture.rs` |
+> | 结构层（负向） | `nexus_repo_does_not_touch_workflow_runs` | `nexus-core/tests/architecture.rs` |
+> | 结构层（负向） | `nexus_repo_must_not_write_execution_owned_tables` | `nexus-repo/tests/architecture.rs` |
+>
+> 三条都基于**新增**的 token 级能力：`ScanResult::writes_table` 与
+> `extract_sql_writes`（`crates/nexus-core/tests/support/token_scan.rs`）——
+> 它把 SQL 文本拆成**词序列**，识别 `INSERT` / `UPDATE` / `DELETE`
+> 及其**目标表**。
+>
+> ⚠️ **为什么必须做「写操作」而不是「提到」**：
+> `SELECT * FROM workflow_runs` 与 `INSERT INTO workflow_runs ...`
+> **都**含表名，但前者是**读**、后者是**写**。
+> 架构文档 §4.2 差异 1 判定的正是**写入权** —— 读写不分，判定就失去意义。
+>
+> ⚠️ **为什么 `CREATE TABLE` 不算写操作**：
+> `nexus-infra` 持有**迁移文件** —— `workflow_runs` 的表结构必须在迁移里定义。
+> 建表是**结构**定义，不是**数据**写入（§4.3.2 约束 2 明确允许）。
+>
+> ⚠️ **已知识别边界（NEX-37 预审实测，2026-11-06）**：
+> `extract_sql_writes` 是**词法级**识别，**当前不覆盖**以下能造成写入的形态 ——
+> 它们**会漏判**（实测可绕过断言）：
+>
+> | 漏判形态 | 提取到的「表名」 |
+> |---|---|
+> | `INSERT INTO public.workflow_runs ...`（schema 限定） | `public` |
+> | `INSERT /* c */ INTO workflow_runs ...`（块注释） | `c` |
+> | `INSERT -- c\n INTO workflow_runs ...`（行注释） | `c` |
+> | `UPDATE ONLY workflow_runs ...` | `ONLY` |
+> | `INSERT OR REPLACE INTO workflow_runs ...` | `OR` |
+> | `REPLACE INTO workflow_runs ...` | 无 |
+> | `MERGE INTO workflow_runs ... THEN UPDATE SET ...` | `SET` |
+> | `COPY workflow_runs ... FROM STDIN` | 无 |
+> | `TRUNCATE TABLE workflow_runs` | 无 |
+>
+> 根因：`sql_words()` **不剥离 SQL 注释**，注释里的词被当成表名。
+> 修复登记为 **NEX-52**（含对抗输入测试与故障注入）。
+> **当前代码无实际违规** —— `nexus-repo` 对这两张表的引用**全部**在文档注释里。
 >
 > ② §4.4 新增**规则 4**：`nexus-execution → nexus-repo` 允许，`nexus-repo → nexus-execution` 禁止。
+> **落地记录**：由 `nexus-core` 的 `nexus_repo_does_not_depend_on_the_execution_layer`、
+> `nexus-repo` 的 `the_repo_crate_does_not_depend_on_the_execution_layer`
+> 与 `scripts/check-deps.sh` 的**规则 8** 三处共同守护。
+>
 > ③ §4.3 目标态表的 `nexus-execution → nexus-repo` 行由「不依赖 / 不依赖 / ✅」
-> 改为「**依赖** / 不依赖 / ⚠️ 待 T-001 落地」。
+> 改为「**依赖** / 不依赖 / ⚠️ 待 T-001 落地」，**现已落地为 ✅**
+> （`nexus-execution/Cargo.toml` 声明 `nexus-repo.workspace = true`，
+> 且由 `the_execution_crate_depends_on_the_data_layer` 断言它**真的可用**）。
 > ④ §4.1 的 crate 图 `EXE --> REPO` 箭头**本就与 §4.2 / §4.3 一致** ——
 > 修订后 §4.1 / §4.2 / §4.3 / §4.4 **四处一致**，原先的「文档自相矛盾」**消解**。
+>
+> ⑤ **围栏「只有一处定义」的纪律不受本次修订影响** ——
+> 围栏条件仍**只有** `nexus-repo/src/lease.rs` 的 `Fence::CONDITIONS_TEMPLATE` 一处。
+> 新增 `nexus-execution` 的 `the_execution_crate_does_not_inline_fenced_writes`
+> 断言执行层**不得**内联围栏条件的**任何**子句 ——
+> 判据是**六个子句逐条**匹配，因此「只抄了五个」（少了 `lease_until` 或 `deadline_at`）
+> 这种更隐蔽的退化**也会**被抓住。
 
 
 ## 5.4 行为层的检验：不变量测试
@@ -2308,7 +2421,7 @@ D9 的**落地证据**是「P5 **必须交付一个真实的端点**」——
 - [x] 事件类型清单与负载（§2.2.4）—— 前后端契约 —— 2026-11-04 定稿，12 个事件类型见 §2.2.4.1
 - [x] 错误分类与码段（§2.6）—— API 契约 —— 2026-11-04 定稿，42 个业务码见 §2.6.4.1
 - [x] ID 类型（§2.8）—— 贯穿所有表 —— 2026-11-04 定稿，18 个 ID 类型见 §2.8.1
-- [x] crate 边界与 trait 归属（§4.1.2）—— 影响所有 import —— 2026-11-04 定稿；**2026-11-06 修订**（决策 D12 · 选项 B）：`nexus-execution → nexus-repo` 允许，`nexus-repo → nexus-execution` 禁止（§4.4 规则 4），`workflow_runs` 的写入权判定改为「**写操作**归属」（§4.2 差异 1）
+- [x] crate 边界与 trait 归属（§4.1.2）—— 影响所有 import —— 2026-11-04 定稿；**2026-11-06 修订**（决策 D12 · 选项 B）：`nexus-execution → nexus-repo` 允许，`nexus-repo → nexus-execution` 禁止（§4.4 规则 4），`workflow_runs` 的写入权判定改为「**写操作**归属」（§4.2 差异 1）—— **NEX-37 / T-001 已落地**，判定由 `nexus-core` / `nexus-repo` / `nexus-execution` 三处架构断言 + `check-deps.sh` 规则 8 共同守护
 - [x] **MCP / A2A 的层归属**（§4.3.1）—— 2026-11-04 定稿：MCP 纯出站，A2A 双向
 - [x] **`service → execution` 的依赖形态**（§4.3.2）—— 2026-11-04 定稿：选项 A，`execution` 暴露 `RunSubmitter` trait
 

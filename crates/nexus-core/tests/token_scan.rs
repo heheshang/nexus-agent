@@ -358,6 +358,152 @@ fn a_parse_error_is_reported_not_swallowed() {
     );
 }
 
+/// **SQL 写操作**的判定 —— 读与写**必须**分得开。
+///
+/// 这是架构文档 §4.2 差异 1（决策 D12 · 选项 B）的**判定基础**：
+/// `workflow_runs` 的**写入权**归执行层独占。
+#[test]
+fn a_sql_write_is_distinguished_from_a_sql_read() {
+    let source = r#"
+fn f() {
+    let read = "SELECT * FROM workflow_runs";
+    let write = "INSERT INTO workflow_runs (id) VALUES ($1)";
+}
+"#;
+    let result = token_scan::scan_code_and_strings(source).expect("解析失败");
+    assert!(
+        result.writes_table("workflow_runs"),
+        "INSERT 必须被识别为写操作：{:?}",
+        result.sql_writes
+    );
+    assert!(!result.sql_writes.is_empty(), "写操作集合不应为空");
+}
+
+/// **只有 `SELECT` 的 SQL 不算写操作** —— 读不构成写入。
+#[test]
+fn a_select_only_statement_is_not_a_write() {
+    let source = r#"
+fn f() {
+    let sql = "SELECT id FROM workflow_step_runs WHERE run_id = $1";
+}
+"#;
+    let result = token_scan::scan_code_and_strings(source).expect("解析失败");
+    assert!(
+        !result.writes_table("workflow_step_runs"),
+        "SELECT 不是写操作：{:?}",
+        result.sql_writes
+    );
+    // ⚠️ 但它**确实**提到了这张表 —— 证明「提到」与「写到」是两件事。
+    assert!(
+        result.mentions("workflow_step_runs"),
+        "SELECT 仍然提到了表名：{:?}",
+        result.strings
+    );
+}
+
+/// **建表 DDL 不是写操作** —— `nexus-infra` 的迁移**必须**能通过。
+///
+/// 架构文档 §4.3.2 约束 2：`nexus-infra` 允许**建表 DDL**（迁移），不是访问。
+#[test]
+fn a_create_table_statement_is_not_a_write() {
+    let source = r#"
+fn f() {
+    let ddl = "CREATE TABLE workflow_runs (id BIGINT PRIMARY KEY)";
+}
+"#;
+    let result = token_scan::scan_code_and_strings(source).expect("解析失败");
+    assert!(
+        !result.writes_table("workflow_runs"),
+        "建表 DDL 不是写操作：{:?}",
+        result.sql_writes
+    );
+}
+
+/// **各种 SQL 形态都必须被识别** —— 大小写、换行、缩进、引号。
+///
+/// ⚠️ 这是「看起来覆盖了，实际没有」的高发区 ——
+/// 只认 `INSERT INTO ` 一种形态的实现，会在别的写法上**静默漏报**。
+#[test]
+fn sql_write_survives_formatting_variations() {
+    let cases = [
+        (
+            "INSERT INTO workflow_runs (id) VALUES ($1)",
+            "workflow_runs",
+        ),
+        (
+            "insert into workflow_runs (id) values ($1)",
+            "workflow_runs",
+        ),
+        (
+            "INSERT  INTO   workflow_runs (id) VALUES ($1)",
+            "workflow_runs",
+        ),
+        (
+            "INSERT\nINTO workflow_runs\n(id) VALUES ($1)",
+            "workflow_runs",
+        ),
+        ("UPDATE workflow_runs SET status = 'done'", "workflow_runs"),
+        ("update workflow_runs set status = 'done'", "workflow_runs"),
+        (
+            "DELETE FROM workflow_step_runs WHERE id = $1",
+            "workflow_step_runs",
+        ),
+        (
+            "delete from workflow_step_runs where id = $1",
+            "workflow_step_runs",
+        ),
+        (
+            r#"INSERT INTO "workflow_runs" (id) VALUES ($1)"#,
+            "workflow_runs",
+        ),
+    ];
+
+    for (sql, table) in cases {
+        let writes = token_scan::extract_sql_writes(sql);
+        assert!(
+            writes.iter().any(|w| w.table == table),
+            "未识别出 {table} 的写操作（SQL：{sql}）—— 实际：{writes:?}"
+        );
+    }
+}
+
+/// **字符串字面量里的内容不算写操作** —— 那是**值**，不是 SQL。
+///
+/// `WHERE name = 'update workflow_runs'` 里的 `update` 不是写操作。
+/// 若不跳过字符串字面量，这类字面量会造成**假阳性**。
+#[test]
+fn a_write_inside_a_string_literal_is_not_a_write() {
+    let source = r#"
+fn f() {
+    let sql = "SELECT * FROM runs WHERE name = 'INSERT INTO workflow_runs'";
+}
+"#;
+    let result = token_scan::scan_code_and_strings(source).expect("解析失败");
+    assert!(
+        !result.writes_table("workflow_runs"),
+        "字符串字面量里的 INSERT 不是写操作：{:?}",
+        result.sql_writes
+    );
+}
+
+/// **写操作的识别不依赖 `collect_strings`** —— 否则是绕过写权限的路径。
+///
+/// 「用 `code_only` 扫描」**不得**成为一条绕过写权限判定的路。
+#[test]
+fn sql_writes_are_detected_even_without_string_collection() {
+    let source = r#"
+fn f() {
+    let sql = "INSERT INTO workflow_runs (id) VALUES ($1)";
+}
+"#;
+    let result = token_scan::scan_code(source).expect("解析失败");
+    assert!(
+        result.writes_table("workflow_runs"),
+        "写操作的判定必须独立于字符串收集：{:?}",
+        result.sql_writes
+    );
+}
+
 /// **目录扫描**必须把解析失败的文件**收集**起来。
 #[test]
 fn scan_dir_collects_parse_errors() {

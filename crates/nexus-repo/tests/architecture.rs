@@ -12,7 +12,7 @@
 //!
 //! 1. 每个行类型都实现了 `FromRow`（**编译期**检查 —— 漏派生就编译不过）。
 //! 2. 表清单的长度与行类型数**一致** —— 防止「加了表但忘了写行类型」。
-//! 3. `nexus-repo` 的源码里**不出现** `workflow_runs` / `workflow_step_runs`
+//! 3. `nexus-repo` 的源码里**不得写** `workflow_runs` / `workflow_step_runs`
 //!    —— 架构文档 §4.2 差异 1 与 `docs/operations/p2-plan.md` 红线 3。
 
 use nexus_repo::rows::{
@@ -22,6 +22,16 @@ use nexus_repo::rows::{
     WorkflowVersionRow,
 };
 use sqlx::FromRow;
+
+// include 共享实现 —— `crates/nexus-core/tests/support/token_scan.rs`
+//
+// ⚠️ 为什么用 `#[path]` 而不是抽一个 crate
+//
+// 抽 crate 会**新增**一条依赖边，而本仓库的依赖方向是**已定稿**条款
+// （架构文档 §6.3 第 5 项）。`#[path]` include 只需要**文件系统**上的相对路径，
+// **不产生任何依赖边** —— `Cargo.toml` 完全不动。
+#[path = "../../nexus-core/tests/support/token_scan.rs"]
+mod token_scan;
 
 /// Phase 0 的表名清单（`nexus-execution` 独占的两张表除外）。
 ///
@@ -89,21 +99,37 @@ fn phase0_table_list_matches_row_type_count() {
     );
 }
 
-/// `nexus-repo` **不得**引用 `workflow_runs` / `workflow_step_runs`。
+/// §4.2 差异 1 —— `nexus-repo` **不得写** `workflow_runs` / `workflow_step_runs`。
 ///
-/// 架构文档 §4.2 差异 1：`workflow_runs` 由 `nexus-execution` 独占
-/// —— `nexus-repo` 引用它就是偏离架构决策。
+/// 架构文档 §4.2 差异 1：`workflow_runs` / `workflow_step_runs` 的
+/// **写入权**由 `nexus-execution` 独占。
+///
+/// # ⚠️ 为什么判定手段是「**写**」而不是「**引用**」（2026-11-06 修订）
+///
+/// 本断言原先写作「`nexus-repo` **不得引用**这两张表」。
+/// 那是**类型归属**判定 —— 它成立的前提是
+/// 「`nexus-repo` 不依赖 `nexus-execution`」，于是类型只在执行层可见。
+///
+/// 依赖方向改为 `execution → repo`（决策 D12 · 选项 B）后，
+/// `nexus-repo` 的类型对**所有依赖它的 crate** 可见 ——
+/// 「`nexus-repo` 不持有该类型」**推不出**「别的 crate 写不了」。
+///
+/// 判定手段因此改为「**写操作**归属」：
+/// `INSERT` / `UPDATE` / `DELETE` 这两张表**只允许**出现在 `nexus-execution`。
+///
+/// 强度**不降** —— 类型归属可被「把类型下沉到 `nexus-repo`」绕过；
+/// 写操作归属管住**任何 crate 的任何写操作**。
 ///
 /// # 为什么用**源码扫描**而不是编译期断言
 ///
 /// 编译期断言要求「不存在某个类型」—— 而 Rust 没有「负向类型约束」。
-/// 只能扫描源码。这是 `scripts/check-deps.sh` 规则 3 的同类手法
+/// 只能扫描源码。这与 `scripts/check-deps.sh` 规则 3 是同类手法
 /// （那里也是扫描 `Cargo.toml`）。
 ///
 /// 扫描范围是**本 crate 的 `src/` 目录** —— 测试文件本身会提到
 /// 这两个名字（就在本文件的注释与常量里），所以必须排除。
 #[test]
-fn nexus_repo_must_not_reference_execution_owned_tables() {
+fn nexus_repo_must_not_write_execution_owned_tables() {
     let src_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut offenders: Vec<String> = Vec::new();
 
@@ -121,20 +147,20 @@ fn nexus_repo_must_not_reference_execution_owned_tables() {
                 continue;
             }
             let content = std::fs::read_to_string(&path).expect("读取源码文件失败");
-            for (line_no, line) in content.lines().enumerate() {
-                // 只看**代码**：跳过注释行与文档注释行。
-                let trimmed = line.trim_start();
-                if trimmed.starts_with("//") {
-                    continue;
-                }
-                for forbidden in ["workflow_runs", "workflow_step_runs"] {
-                    if trimmed.contains(forbidden) {
-                        offenders.push(format!(
-                            "{}:{}: 出现了 {forbidden}",
-                            path.display(),
-                            line_no + 1
-                        ));
-                    }
+            // ⚠️ 判据是「**写**过这张表」—— `SELECT` **不算**。
+            //
+            // 用 token 级扫描（而不是逐行 grep）——
+            // 注释里的表名是**说明性文字**，不是访问。
+            let scanned = token_scan::scan_code_and_strings(&content).unwrap_or_else(|e| {
+                panic!(
+                    "解析 {} 失败：{e} —— 解析失败会让扫描结果**不完整**，\
+                     那正是「静默失效」的形态",
+                    path.display()
+                )
+            });
+            for forbidden in ["workflow_runs", "workflow_step_runs"] {
+                if scanned.writes_table(forbidden) {
+                    offenders.push(format!("{}: 写了 {forbidden}", path.display(),));
                 }
             }
         }
@@ -142,8 +168,42 @@ fn nexus_repo_must_not_reference_execution_owned_tables() {
 
     assert!(
         offenders.is_empty(),
-        "nexus-repo 不得引用 nexus-execution 独占的表：\n{}",
+        "nexus-repo 不得写 nexus-execution 独占的表：\n{}",
         offenders.join("\n")
+    );
+}
+
+/// §4.4 规则 4 —— `nexus-repo` **不得**依赖 `nexus-execution`。
+///
+/// # 为什么这条必须存在
+///
+/// 决策 D12（选项 B，2026-11-06 操作者裁决）确立了
+/// `nexus-execution → nexus-repo` 的**单向**依赖：
+/// 执行层复用数据层的引擎侧持久化能力
+/// （租约 / fencing / 幂等提交 / 事件序号），而引擎侧持久化**留在** `nexus-repo`。
+///
+/// 反向依赖会成环（`execution → repo → execution`）——
+/// Cargo 在**编译期**就会拒绝，所以它不会「悄悄跑起来」。
+///
+/// 但这条断言**不是**多此一举：
+///
+/// 1. 它给出的**失败信息**比 Cargo 的环报错**可读得多**；
+/// 2. 它把「单向」这条**契约**钉在**测试**里，
+///    而不只是依赖 Cargo 的隐式保证 ——
+///    「Cargo 会拒绝」不等于「架构文档 §4.4 规则 4 被验证过」；
+/// 3. `nexus-core` 的 `dependency_graph_is_acyclic` 判的是「**无环**」，
+///    判不出「**方向对**」。
+#[test]
+fn the_repo_crate_does_not_depend_on_the_execution_layer() {
+    let manifest = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"),
+    )
+    .expect("读取 Cargo.toml 失败");
+
+    assert!(
+        !manifest.contains("nexus-execution"),
+        "nexus-repo 不得依赖 nexus-execution —— 反向会成环\
+         （架构文档 §4.4 规则 4：execution → repo 允许，repo → execution 禁止）"
     );
 }
 

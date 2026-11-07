@@ -110,7 +110,7 @@
       "verified_by": [
         "crates/nexus-repo/src/lease.rs::conditions_list_all_six_clauses_in_bind_order"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P6-I02",
@@ -120,7 +120,7 @@
       "verified_by": [
         "crates/nexus-repo/tests/lease_fencing.rs::stale_generation_write_is_rejected"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P6-I03",
@@ -130,7 +130,7 @@
       "verified_by": [
         "crates/nexus-repo/tests/compile_fail.rs::fenced_write_requires_a_lease"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P6-I04",
@@ -140,7 +140,7 @@
       "verified_by": [
         "crates/nexus-repo/tests/compile_fail.rs::run_lease_cannot_be_constructed_directly"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P6-I05",
@@ -150,7 +150,7 @@
       "verified_by": [
         "crates/nexus-repo/tests/compile_fail.rs::run_lease_has_no_generation_accessor"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P6-I06",
@@ -160,7 +160,7 @@
       "verified_by": [
         "crates/nexus-execution/tests/architecture.rs::the_execution_crate_depends_on_the_data_layer"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P6-I07",
@@ -170,7 +170,7 @@
       "verified_by": [
         "crates/nexus-execution/tests/architecture.rs::the_execution_crate_does_not_depend_on_the_upper_layers"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P6-I08",
@@ -180,7 +180,7 @@
       "verified_by": [
         "crates/nexus-core/tests/architecture.rs::workflow_runs_appears_only_in_execution_owned_crates"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P6-I09",
@@ -558,7 +558,7 @@
       "verified_by": [
         "crates/nexus-repo/tests/architecture.rs::the_repo_crate_does_not_depend_on_the_execution_layer"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P6-I50",
@@ -568,7 +568,7 @@
       "verified_by": [
         "crates/nexus-execution/tests/architecture.rs::the_execution_crate_does_not_inline_fenced_writes"
       ],
-      "status": "planned"
+      "status": "verified"
     },
     {
       "id": "P6-I51",
@@ -578,7 +578,7 @@
       "verified_by": [
         "crates/nexus-core/tests/architecture.rs::workflow_runs_appears_only_in_execution_owned_crates"
       ],
-      "status": "planned"
+      "status": "verified"
     }
   ],
   "pipeline_order": [

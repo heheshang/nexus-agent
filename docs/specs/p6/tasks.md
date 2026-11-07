@@ -54,7 +54,7 @@ T-010（收口）依赖全部
 > 时间盒截止 **2026-11-13**；到期前**不实施**；
 > 无人干预时的自主回退 = 按选项 B 执行（依赖边是加法、文档修订可 `git revert`）。
 
-对应 backlog 任务：`backlog/tasks/NEX-37 - feat(execution) 引擎侧持久化归属落地 —— 新增依赖与已定稿条款修订.md`
+对应 backlog 任务：`backlog/completed/NEX-37 - feat(execution) 引擎侧持久化归属落地 —— 新增依赖与已定稿条款修订.md`
 依赖：无
 对应设计条款：架构文档 §4.1、§4.2 差异 1、§4.3 目标态表、§4.3.2 约束 2、§4.4 规则 4、§6.3
 
@@ -75,6 +75,14 @@ T-010（收口）依赖全部
 - AC: `Fence::CONDITIONS_TEMPLATE` 的**文本逐字节不变** —— 围栏条件的六个子句与绑定顺序**不改**
 - AC: `bash scripts/check-deps.sh` 通过（规则 7：`deps_of` ↔ `Cargo.toml` 一致）
 - AC: `cargo fmt --all --check` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo test --workspace --locked` 通过
+
+> ✅ **T-001 已落地**（2026-11-06，NEX-37）——
+> 依赖边、文档修订与架构断言**全部**完成；`docs/specs/p6/contracts/invariants.json`
+> 的 P6-I01 ~ I08 / I49 / I50 / I51 共 **11 条**不变量已由 `planned` 升格为 `verified`。
+>
+> ⚠️ **剩余**：**人工评审**（AC #17）—— 触及**已定稿条款**（架构文档 §6.3 第 5 项），
+> 需人工批准**且** AI 产出的改动需**额外一名评审**。
+> 该门槛**阻塞合并**，不阻塞后续任务的推进。
 
 ### T-002 — 落地冻结定义与图编译
 
@@ -255,4 +263,25 @@ T-010（收口）依赖全部
 - AC: 故障注入的记录写进任务文件（含「注入什么 / 期望 / 实际」）
 - AC: `docs/operations/` 有 P6 的运行说明（需要 PostgreSQL 17 的集成测试怎么跑、缺 `DATABASE_URL` 会 panic）
 - AC: `bash scripts/check-docs.sh` 通过；`bash scripts/check-backlog.sh` 通过
+- AC: `cargo fmt --all --check` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo test --workspace --locked` 通过
+
+### T-011 — 修写操作识别的漏判（扫描器健壮性）
+
+**T-001 预审发现的工具缺陷** —— 判定手段本身漏判多种能造成写入的 SQL 形态。
+
+对应 backlog 任务：`backlog/tasks/NEX-52 - fix(core) 修写操作识别的漏判 —— SQL 注释剥离与 schema 限定.md`
+依赖：T-001
+对应设计条款：架构文档 §4.2 差异 1、§4.3.2 约束 2（**已知识别边界**段落）
+
+- AC: `sql_words()` 剥离 `/* ... */` 与 `-- ...` 两种 SQL 注释 —— 注释里的词**不再**被当成表名
+- AC: 表名提取剥离 **schema 限定** —— `public.workflow_runs` 的表名是 `workflow_runs`
+- AC: `REPLACE INTO` / `MERGE INTO` / `COPY ... FROM` / `TRUNCATE TABLE` 被识别为写操作
+- AC: `INSERT OR REPLACE INTO` / `UPDATE ONLY` 这类**修饰词**形态被识别为写操作
+- AC: `crates/nexus-core/tests/token_scan.rs` 的**对抗输入测试**逐条覆盖上述每个形态
+- AC: **故障注入**：`INSERT INTO public.workflow_runs ...` 加进 `nexus-repo` 后，
+  `nexus_repo_does_not_touch_workflow_runs` 与 `workflow_runs_appears_only_in_execution_owned_crates`
+  **两条断言都变红**
+- AC: 读操作与**建表 DDL**仍**不**被误判为写；字符串字面量里的内容仍**不**算写
+- AC: 架构文档 §4.3.2 约束 2 的「识别边界」说明**更新**为修复后的实际覆盖范围
+- AC: `bash scripts/check-naming.sh` / `check-backlog.sh` / `check-specs.sh` / `check-docs.sh` 通过
 - AC: `cargo fmt --all --check` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo test --workspace --locked` 通过
