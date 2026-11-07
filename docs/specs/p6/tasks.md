@@ -105,6 +105,36 @@ T-010（收口）依赖全部
 - AC: `crates/nexus-workflow/src/lib.rs` 的 crate 级文档写明「本 crate 负责图引擎 / 不负责持久化」
 - AC: `cargo fmt --all --check` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo test --workspace --locked` 通过
 
+> ✅ **T-002 已落地**（2026-11-07，NEX-38）——
+> `crates/nexus-workflow/src/definition.rs`（`FrozenDefinition` 三件套）
+> + `crates/nexus-workflow/src/graph.rs`（`CompiledGraph` / `NodeKind` 六种 / `compile`）
+> + 三个测试文件（`tests/definition.rs` 10 个 / `tests/graph.rs` 21 个 / `tests/architecture.rs` 3 个）。
+>
+> ⚠️ **三处偏离任务 AC 的原始措辞**，均已记录决策：
+>
+> 1. **子图按名注册**（`GraphDefinition::subgraphs`）而非**树内嵌** ——
+>    树内嵌的话 JSON 是**树**、**字面上无法包含自己**，
+>    「递归检测」就是**永不触发的死代码**。
+>    参考架构 §3.5.1 明确子图来自**冻结的** `definition.Subflows`（按名注册的表），
+>    参考实现的递归检测用 `c.stack`（参考架构 §3.5.2）——
+>    那个 stack 装的就是**正在展开的子图名**。
+>    递归判据因此是「**子图名**在展开路径上」。
+> 2. **父图后继挂在子图出口**而非容器 ——
+>    挂在容器上是**错的**：容器只是子图的**入口**，它完成**不代表子图跑完**。
+>    有专门的测试 `parent_successor_is_gated_by_subgraph_exit_not_by_container` 守住。
+> 3. **状态大小上限**是**独立判据函数** `check_state_size` 而非编译期检查 ——
+>    状态是**运行期**的东西，编译期还没有状态。
+>    错误映射（`BudgetExceeded`）与上限值（4 MiB）都有测试。
+>
+> **变异测试 6 次注入**，全部被精确抓住。其中「节点数上限 128 → 1000」
+> **第一次未被抓住** —— 因为断言引用了**同一个常量**（恒真）。
+> 上限断言改用**字面量**后抓住。这条教训写进了架构文档 §2.5.5。
+>
+> ⚠️ **`Cargo.toml` 新增了 `syn`（dev-dependency）** ——
+> DoR 原写「不修改」，但**结构层断言**需要 token 级扫描器（`syn`），
+> 且它必须**剥离注释**（文档注释里恰恰要出现 `sqlx` 一词）。
+> dev-dependency **不影响生产依赖方向**。
+
 ### T-003 — 落地节点执行契约与图状态
 
 **节点是唯一的扩展点**：契约（trait）+ 状态容器 + 条件求值 + 模板渲染。
