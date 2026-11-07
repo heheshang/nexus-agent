@@ -18,4 +18,20 @@ configs/secrets.yaml
 # 其他
 *.log
 *.log.*
+
+# 编译器的 stderr 输出 —— 一般都是构建产物，忽略。
+#
+# ⚠️ **例外**：trybuild 的负向测试快照（`.stderr`）是**测试夹具**，
+#    **必须入库** —— 快照入库意味着「编译器行为变化会立刻让测试失败」，
+#    这是负向断言不因工具链升级而悄悄失效的**唯一**保障。
+#
+# 快照缺失时 trybuild **不会跳过**，而是把用例判为 FAILED
+# （它会写 `wip/*.stderr` 并要求人工确认）——
+# 也就是说：漏入库 = CI 在干净检出上全红。
 *.stderr
+
+# trybuild 负向测试的快照目录 —— 逐个放行。
+# 目录名固定为 `compile_fail`，与 trybuild 的约定一致。
+!crates/*/tests/compile_fail/*.stderr
+!examples/*/tests/compile_fail/*.stderr
+!examples/*/*/tests/compile_fail/*.stderr

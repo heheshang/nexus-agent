@@ -1,0 +1,15 @@
+error[E0061]: this function takes 3 arguments but 2 arguments were supplied
+  --> tests/compile_fail/fenced_write_requires_a_lease.rs:28:13
+   |
+28 |     let _ = ExecutionLeaseRepository::write_status_fenced(&mut tx, "done");
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^          ------ argument #2 of type `&RunLease` is missing
+   |
+note: associated function defined here
+  --> src/leases.rs
+   |
+   |     pub async fn write_status_fenced(
+   |                  ^^^^^^^^^^^^^^^^^^^
+help: provide the argument
+   |
+28 |     let _ = ExecutionLeaseRepository::write_status_fenced(&mut tx, /* &RunLease */, "done");
+   |                                                                    ++++++++++++++++

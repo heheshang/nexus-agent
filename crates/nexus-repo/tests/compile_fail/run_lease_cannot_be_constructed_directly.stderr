@@ -1,0 +1,10 @@
+error[E0624]: associated function `new` is private
+  --> tests/compile_fail/run_lease_cannot_be_constructed_directly.rs:28:28
+   |
+28 |     let _lease = RunLease::new(RunId::new(1), 0, "worker");
+   |                            ^^^ private associated function
+   |
+  ::: src/lease.rs
+   |
+   |     pub(crate) fn new(run_id: RunId, generation: i64, owner: impl Into<String>) -> Self {
+   |     ----------------------------------------------------------------------------------- private associated function defined here

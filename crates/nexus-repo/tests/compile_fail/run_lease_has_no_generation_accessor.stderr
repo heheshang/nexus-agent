@@ -1,0 +1,5 @@
+error[E0599]: no method named `generation` found for struct `RunLease` in the current scope
+  --> tests/compile_fail/run_lease_has_no_generation_accessor.rs:33:29
+   |
+33 |     let _generation = lease.generation();
+   |                             ^^^^^^^^^^ private field, not a method
