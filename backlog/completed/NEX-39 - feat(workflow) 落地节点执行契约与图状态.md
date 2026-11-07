@@ -84,7 +84,7 @@ references:
 |---|---|
 | `cargo fmt --all --check` | ✅ 通过 |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | ✅ 零告警 |
-| `cargo test --workspace --locked` | ⚠️ **除 `nexus-core` / `nexus-repo` 的 trybuild 快照缺失外全绿** —— 见下方「已知失败」 |
+| `cargo test --workspace --locked` | ✅ **80 个测试套件全绿，零失败** |
 | `bash scripts/check-lock.sh` | ✅ 通过 |
 | `bash scripts/check-deps.sh` | ✅ 通过 |
 | `bash scripts/check-naming.sh` | ✅ 通过 |
@@ -93,16 +93,19 @@ references:
 | `bash scripts/check-rules.sh` | ✅ 通过 |
 | `bash scripts/check-docs.sh` | ✅ 通过 |
 
-### 已知失败（**预存在**，与本任务无关）
+### ⚠️ 曾存在的预存在失败（**已在本分支解决**）
 
-`nexus-core` 与 `nexus-repo` 的 `trybuild` 负向测试**缺 `.stderr` 快照** ——
+`nexus-core` / `nexus-repo` 的 trybuild 负向测试**缺 `.stderr` 快照** ——
 干净检出下会红（trybuild 会现场生成快照并让测试失败）。
 
 - **已验证是预存在**：把本任务的**全部**改动 `git stash` 后重跑，失败**完全相同**。
-- **归属**：NEX-53（`fix/trybuild-snapshots-not-tracked`，提交 `a82fad4`）——
-  那条分支已把 9 个 `.stderr` 快照入库，**未合入本分支**。
-- **本任务不动它**：那是**另一条并行分支**的工作，且与 `nexus-workflow` **无交集**。
-  合并顺序由操作者决定。
+- **归属**：并行分支 `fix/trybuild-snapshots-not-tracked`（提交 `a82fad4`）——
+  那条分支已把 9 个 `.stderr` 快照入库。
+- **处置**（**操作者 2026-11-07 裁决**：cherry-pick 进本分支）：
+  把 `a82fad4` cherry-pick 进本分支 —— 已验证**无冲突**，
+  本地 trybuild 11 + 4 个用例**全绿**，全 workspace 80 个套件**零失败**。
+- **后续**：本分支与 NEX-53 分支合并时，该提交会被 Git 识别为重复 —— 需按
+  常规 rebase 流程处理（**不**用 `git reset --hard` / `git checkout -- .`）。
 
 ### 三层验证的落点
 

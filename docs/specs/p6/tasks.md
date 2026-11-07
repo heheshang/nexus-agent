@@ -187,11 +187,11 @@ T-010（收口）依赖全部
 > 含「条件失败 → `false`」「状态超限不回滚」「整串占位符丢类型」
 > 「闸门不扣减槽位」「热路径引入 `Box<dyn>`」等。
 >
-> ⚠️ **已知失败（预存在）**：`nexus-core` / `nexus-repo` 的 trybuild 负向测试
-> **缺 `.stderr` 快照** —— 已用 `git stash` 验证与本任务**无关**，
+> ⚠️ **曾存在的预存在失败（已解决）**：`nexus-core` / `nexus-repo` 的 trybuild
+> 负向测试**缺 `.stderr` 快照** —— 已用 `git stash` 验证与本任务**无关**，
 > 归属并行分支 `fix/trybuild-snapshots-not-tracked`（提交 `a82fad4` 把 9 个快照入库）。
-> 本分支**不**动它 —— 那是**另一条并行分支**的工作，与 `nexus-workflow` **无交集**；
-> 合并顺序由操作者决定。
+> **操作者 2026-11-07 裁决**：把该提交 cherry-pick 进本分支
+> —— 已验证**无冲突**，本地全 workspace **80 个套件零失败**。
 >
 > （注：这里**刻意**不写成 `NEX-nn` 形式 —— `check-specs.sh` 规则 2 会把
 > `tasks.md` 里出现的每个 `NEX-nn` 当作「必须存在于 backlog」的引用，
