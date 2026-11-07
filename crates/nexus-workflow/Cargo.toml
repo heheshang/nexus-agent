@@ -19,6 +19,9 @@ serde.workspace = true
 serde_json.workspace = true
 evalexpr.workspace = true
 async-trait.workspace = true
+# 并发闸门用 `tokio::sync::Semaphore`（NEX-39 AC #5）——
+# 参考架构 §3.5.2 照抄 Go 版 `compiler.slots = 4`。
+tokio.workspace = true
 tracing.workspace = true
 anyhow.workspace = true
 uuid.workspace = true

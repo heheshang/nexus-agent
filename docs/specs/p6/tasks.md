@@ -139,7 +139,7 @@ T-010（收口）依赖全部
 
 **节点是唯一的扩展点**：契约（trait）+ 状态容器 + 条件求值 + 模板渲染。
 
-对应 backlog 任务：`backlog/tasks/NEX-39 - feat(workflow) 落地节点执行契约与图状态.md`
+对应 backlog 任务：`backlog/completed/NEX-39 - feat(workflow) 落地节点执行契约与图状态.md`
 依赖：T-002
 对应设计条款：架构文档 §2.3.2、§2.3.3；参考架构 §2.5、§3.5.4
 
@@ -157,7 +157,46 @@ T-010（收口）依赖全部
 - AC: `crates/nexus-workflow` 的源码**不含** `Box<dyn` 于节点执行热路径 —— `Arc<dyn NodeInvoke>` 只允许出现在**图定义装载**处（结构层断言）
 - AC: `cargo fmt --all --check` 通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 零告警；`cargo test --workspace --locked` 通过
 
-### T-004 — 落地中断提案与审批指纹
+> ✅ **T-003 已落地**（2026-11-07，NEX-39）——
+> `crates/nexus-workflow/src/node.rs`（`NodeInvoke` / `NodeError` 三分类 / `NodeOutput` / `NodeInput`
+> / `NodeContext` / `NodeRegistry` / `ConcurrencyGate`）
+> + `crates/nexus-workflow/src/state.rs`（`GraphState` + 4 MiB 上限 + **回滚**）
+> + `crates/nexus-workflow/src/condition.rs`（`eval_condition` —— 失败 / 非布尔 / 变量缺失**全部**是错误）
+> + `crates/nexus-workflow/src/template.rs`（`render_args` —— 整串占位符保留原始类型 + 残留 `{{` 报错）
+> + 两个测试文件（`tests/node.rs` 26 个 / `tests/architecture.rs` 6 个）。
+>
+> ⚠️ **五处偏离任务 AC 的原始措辞**，均已记录决策（见任务文件的「决策记录」）：
+>
+> 1. **AC #12 的断言比原文更严** —— 原文说「于节点执行热路径」，
+>    但「热路径」在源码里**没有**可判定的标记（那是无法机械判定的争论）。
+>    改为**整个 crate 的 `src/` 里不出现任何 `Box<dyn>`**。
+> 2. **状态超限是「报错 + 回滚」**而非仅「报错」——
+>    若超限的键**留在**状态里，节点读到的就是**半应用**的状态，
+>    与「截断」一样是**静默的错误状态**。
+> 3. **条件求值里对象值不支持，但不让整个求值失败** ——
+>    装上下文时跳过不支持的值，只有表达式**真的引用**了它才报
+>    `UnsupportedValue`。
+> 4. **`NodeError::Interrupt` 的载荷只是最小骨架**（`path` / `prompt`）——
+>    完整的 `Interrupt`（含 `args_hash` / `resume_key`）由 **T-004 / NEX-40** 落地。
+> 5. **`Cargo.toml` 加了 `tokio.workspace = true`** ——
+>    DoR 的「受影响面」表写「不修改」，但**同一份 DoR** 的 #7 门禁**指名**了要补。
+>    两处自相矛盾，以更**具体**的 #7 为准。
+>    `check-deps.sh` 规则 7 **无需修改**（它只比对**内部** `nexus-*` 依赖）。
+>
+> **变异测试 15 次注入**，全部被精确抓住 ——
+> 含「条件失败 → `false`」「状态超限不回滚」「整串占位符丢类型」
+> 「闸门不扣减槽位」「热路径引入 `Box<dyn>`」等。
+>
+> ⚠️ **已知失败（预存在）**：`nexus-core` / `nexus-repo` 的 trybuild 负向测试
+> **缺 `.stderr` 快照** —— 已用 `git stash` 验证与本任务**无关**，
+> 归属并行分支 `fix/trybuild-snapshots-not-tracked`（提交 `a82fad4` 把 9 个快照入库）。
+> 本分支**不**动它 —— 那是**另一条并行分支**的工作，与 `nexus-workflow` **无交集**；
+> 合并顺序由操作者决定。
+>
+> （注：这里**刻意**不写成 `NEX-nn` 形式 —— `check-specs.sh` 规则 2 会把
+> `tasks.md` 里出现的每个 `NEX-nn` 当作「必须存在于 backlog」的引用，
+> 而那个任务**不在本分支**的 backlog 里。）
+
 
 **审批的「哪一次调用、哪些参数」绑定成不可变指纹** —— 参数一变，审批自动失效。
 
